@@ -1,0 +1,16 @@
+# IDE Files
+.idea/
+.project
+.classpath
+.settings/
+*.iml
+*.iws
+*.ipr
+*.swp
+*.bak
+*.orig
+*.rej
+
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
