@@ -1,16 +1,9 @@
-# IDE Files
-.idea/
-.project
-.classpath
-.settings/
-*.iml
-*.iws
-*.ipr
-*.swp
-*.bak
-*.orig
-*.rej
+# macOS system files
+.DS_Store
 
+# Build outputs
 out/
-!**/src/main/**/out/
-!**/src/test/**/out/
+*.jar
+*.list
+*.load
+sample.asm
