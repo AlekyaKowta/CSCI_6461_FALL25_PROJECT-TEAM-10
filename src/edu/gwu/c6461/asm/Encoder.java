@@ -92,6 +92,14 @@ class Encoder {
         int addr = resolveAddr(symtab, ops.get(1), t.lineNo);
         return (opc << 10) | ((0) << 8) | ((ix & 0x3) << 6) | ((indirect?1:0) << 5) | (addr & 0x1F);
     }
+// RFS: return-from-subroutine with 5-bit immediate in the low address field
+private static int emitRfs(int opc, TokenizedLine t) {
+    if (t.operands.size() != 1) {
+        throw Assembler.error(t.lineNo, "RFS expects: immed(0..31)");
+    }
+    int immed = parseRange(t.operands.get(0), t.lineNo, 0, 31);
+    return (opc << 10) | (immed & 0x1F);
+}
 
     private static int resolveAddr(SymbolTable symtab, String tok, int lineNo) {
         if (symtab.containsKey(tok)) return symtab.get(tok);
