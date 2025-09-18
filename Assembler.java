@@ -1,14 +1,12 @@
-
- import java.io.BufferedReader;
- import java.io.BufferedWriter;
- import java.io.FileReader;
- import java.io.FileWriter;
- import java.io.IOException;
- import java.util.ArrayList;
-import java.util.Arrays;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 
-public class Assembler{
+public class Assembler {
     public static final HashMap<String, Integer> opcodeForArithmeticAndLogic = new HashMap<>();
     public static final HashMap<String, Integer> opcodeForShiftRotate = new HashMap<>();
     public static final HashMap<String, Integer> opcodeForIO = new HashMap<>();
@@ -17,8 +15,7 @@ public class Assembler{
     //TODO: Include Floating Point Vectors
 
     static {
-        // Initializing the opcode hashmap with instruction mnemonics and their
-        // corresponding binary opcode representations.
+        // Initialize opcode hashmaps
         opcodeForMisallaneous.put("HLT", 000);
         opcodeForMisallaneous.put("TRAP", 045);
         opcodeForLSAndOther.put("LDR", 001);
@@ -51,37 +48,61 @@ public class Assembler{
         opcodeForIO.put("OUT", 033);
         opcodeForIO.put("CHK", 034);
         //TODO: Include Floating Point Vectors
-
     }
-    public int currentAddress = 0; // This tracks the current address location.
-    public String LISTING_FILE = "listingFile.txt"; // output file name for the listing file5.
+
+    public int currentAddress = 0; // Tracks current address
+    public String LISTING_FILE = "listingFile.txt"; 
     public String LOAD_FILE = "LoadFile.txt";
 
-    public ArrayList<String> firstPass(String inputFile)throws Exception   { 
+    // 🔹 Symbol Table
+    public HashMap<String, Integer> symbolsMap = new HashMap<>();
+
+    public ArrayList<String> firstPass(String inputFile) throws Exception {
         BufferedReader reader = new BufferedReader(new FileReader(inputFile));
-        ArrayList<String> inputRows = new ArrayList<>(); // ArrayList to store the instructions for the secondPass
-        // call.
+        ArrayList<String> inputRows = new ArrayList<>();
         String row;
 
-        while ((row = reader.readLine()) != null) { // Read each line of the input file and remove comment if it is
-            // present in the inputfile.
+        // Read and clean comments
+        while ((row = reader.readLine()) != null) {
             int commentIndex = row.indexOf(';');
             if (commentIndex != -1) {
                 row = row.substring(0, commentIndex).trim();
-                if (!row.isEmpty()) {
-                    inputRows.add(row);
-                }
             } else {
-                inputRows.add(row.trim());
+                row = row.trim();
+            }
+            if (!row.isEmpty()) {
+                inputRows.add(row);
             }
         }
-        reader.close(); // closing the file after reading it.
+        reader.close();
 
-        //TODO: Parse Symbols and Update Current Address
-       
+        // 🔹 Parse symbols & update currentAddress
+        for (String line : inputRows) {
+            // LOC directive
+            if (line.startsWith("LOC")) {
+                String locationString = "LOC";
+                currentAddress = Integer.parseInt(line.substring(locationString.length()).trim());
+                continue;
+            }
+
+            // Label handling (e.g., End:)
+            int symbolIndex = line.indexOf(':');
+            if (symbolIndex != -1) {
+                String label = line.substring(0, symbolIndex).trim();
+                symbolsMap.put(label, currentAddress);
+                line = line.substring(symbolIndex + 1).trim(); // Remaining part after label
+            }
+
+            // Instructions or data → increment address
+            if (!line.isEmpty()) {
+                currentAddress++;
+            }
+        }
+
+        return inputRows;
     }
 
-  // This method gets the data and writes its contents into the file path given
+    // Utility: write to file
     public static void exportDataToFile(String filePath, ArrayList<String> data) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(filePath))) {
             for (String line : data) {
@@ -95,15 +116,25 @@ public class Assembler{
 
     public static void main(String[] args) {
         try {
-            Assembler assembler = new Assembler();// Create an instance of the assembler.
+            Assembler assembler = new Assembler();
 
-            //TODO: Implement first and second passes
+            // 🔹 First pass
+            ArrayList<String> inputLines = assembler.firstPass("sourceProgram.txt");
 
-        } catch (Exception e) { //to to catch IOException later
+            // Debug: print symbol table
+            System.out.println("Symbol Table:");
+            for (String key : assembler.symbolsMap.keySet()) {
+                System.out.println(key + " -> " + assembler.symbolsMap.get(key));
+            }
 
-            //e.printStackTrace(); // for debugging the error occured during the execution .
+            // Debug: print cleaned input lines
+            System.out.println("\nCleaned Input Lines:");
+            for (String line : inputLines) {
+                System.out.println(line);
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
-
-}  
-
+}
