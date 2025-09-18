@@ -93,11 +93,15 @@ public class Assembler {
         ArrayList<String> dataToWrite = new ArrayList<>();
         int maxLines = Math.max(inputFileLines.size(), output.size());
 
-        for (int i = 0; i < maxLines; i++) {
-            String sourceLine = (i < inputFileLines.size()) ? inputFileLines.get(i) : "";
-            String resultLine = (i <=output.size()) ? output.get(i) : "";
-
-            dataToWrite.add(String.format("%-50s %s", resultLine, sourceLine)); // Adjust the format according to your needs
+        int outputIndex = 0;
+        for (int i = 0; i < inputFileLines.size(); i++) {
+            String sourceLine = inputFileLines.get(i);
+            if (sourceLine.startsWith("LOC")) {
+                dataToWrite.add(sourceLine); // No machine code for LOC
+            } else {
+                String resultLine = (outputIndex < output.size()) ? output.get(outputIndex++) : "";
+                dataToWrite.add(String.format("%s %s", resultLine, sourceLine));
+            }
         }
         writeDataToFile(destinationFile, dataToWrite);
     }
@@ -124,8 +128,8 @@ public class Assembler {
             case "SMR":
                 r = Integer.parseInt(operands[0]);
                 a1 = Integer.parseInt(operands[1]);
-                address = Integer.parseInt(operands[2]);
                 i = (operands.length > 3) ? Integer.parseInt(operands[3]) : 0; // Optional operand
+                address = Integer.parseInt(operands[2]);
                 return String.format("%06o\t%06o", currentAddress,
                         (opcode << 10) | (r << 8) | (a1 << 6) | (i << 5) | address);
 
@@ -135,9 +139,10 @@ public class Assembler {
             case "JNE":
             case "JMA":
             case "JSR":
-                a1 = Integer.parseInt(operands[0]);
-                address = Integer.parseInt(operands[1]);
-                i = (operands.length > 2) ? Integer.parseInt(operands[2]) : 0;
+                a1 = Integer.parseInt(operands[0]); // First operand (register)
+                address = Integer.parseInt(operands[1]); // Address (memory location)
+                i = (operands.length > 2) ? Integer.parseInt(operands[2]) : 0; // Optional condition flag
+                // Ensure the correct bitwise operations, and shift the operands accordingly
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (a1 << 6) | (i << 5) | address);
 
             case "SETCCE":
@@ -216,137 +221,51 @@ public class Assembler {
     /// <params> inputFileLines</params>
     /// </summary>
     public void secondPass(ArrayList<String> inputFileLines) throws IOException {
+        // Handler map for opcodes
+        java.util.Map<String, java.util.function.BiConsumer<String[], ArrayList<String>>> handlerMap = new java.util.HashMap<>();
+        handlerMap.put("Data", this::handleData);
+        // Arithmetic/Logic
+        handlerMap.put("AND", this::handleArithmeticLogic);
+        handlerMap.put("ORR", this::handleArithmeticLogic);
+        handlerMap.put("NOT", this::handleArithmeticLogic);
+        handlerMap.put("MLT", this::handleArithmeticLogic);
+        handlerMap.put("DVD", this::handleArithmeticLogic);
+        handlerMap.put("TRR", this::handleArithmeticLogic);
+        // Shift/Rotate
+        handlerMap.put("SRC", this::handleShiftRotate);
+        handlerMap.put("RRC", this::handleShiftRotate);
+        // IO
+        handlerMap.put("IN", this::handleIO);
+        handlerMap.put("OUT", this::handleIO);
+        handlerMap.put("CHK", this::handleIO);
+        // Misc
+        handlerMap.put("HLT", this::handleMisc);
+        handlerMap.put("TRAP", this::handleMisc);
+        // Load/Store/Jump/Other
+        String[] lsOps = {"LDR","STR","LDA","LDX","STX","SETCCE","JZ","JNE","JCC","JMA","JSR","RFS","SOB","JGE","AMR","SMR","SIR","AIR"};
+        for (String op : lsOps) handlerMap.put(op, this::handleLSOther);
 
-        BufferedWriter lstWriter = new BufferedWriter(new FileWriter(LISTING_FILE));
-        BufferedWriter objWriter = new BufferedWriter(new FileWriter(LOAD_FILE));
         currentAddress = 0;
-
         ArrayList<String> machineCodeOctal = new ArrayList<>();
         int symbolIndex;
         for (String inputInstruction : inputFileLines) {
             if (inputInstruction.startsWith("LOC")) {
                 String locationDirective = "LOC";
                 currentAddress = Integer.parseInt(inputInstruction.substring(locationDirective.length()).trim());
-                machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, 0)); // Initialize memory location with zero value
                 continue;
             }
-
-            symbolIndex = inputInstruction.indexOf(':'); // Ignoring the label
+            symbolIndex = inputInstruction.indexOf(':');
             if (symbolIndex != -1) {
                 inputInstruction = inputInstruction.substring(symbolIndex + 1).trim();
             }
-
-            if (inputInstruction.isEmpty()) { // passing the empty instruction
+            if (inputInstruction.isEmpty()) {
                 continue;
             }
             String[] instructionComponents = inputInstruction.split("\\s+", 2);
-            if (instructionComponents[0].equals("Data")) {   // parsing using the opcodes form the hashmaps if the component is related to data
-                int dataValue;
-                try {
-                    dataValue = Integer.parseInt(instructionComponents[1]);
-                } catch (NumberFormatException e) {
-                    dataValue = symbolsMap.get(instructionComponents[1]);
-                }
-                machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, dataValue));
-            }
-
-            else if ((instructionComponents[0].equals("AND")) || (instructionComponents[0].equals("ORR"))
-                    || (instructionComponents[0].equals("NOT")) || (instructionComponents[0].equals("MLT"))
-                    || (instructionComponents[0].equals("DVD")) || (instructionComponents[0].equals("TRR"))) { //parsing using the opcodes form the hashmaps if the component is related to arithmetic and logical operations
-                int opcode = opcodeForArithmeticAndLogic.get(instructionComponents[0]);
-
-                // Split and trim the operand list (assuming operands are comma-separated)
-                String[] operands = instructionComponents[1].split(",");
-                Arrays.setAll(operands, i -> operands[i].trim());
-
-                int reg1, reg2;
-
-                if (instructionComponents[0].equals("AND") || instructionComponents[0].equals("ORR")
-                        || instructionComponents[0].equals("MLT")
-                        || instructionComponents[0].equals("DVD") || instructionComponents[0].equals("TRR")) {
-                    reg1 = Integer.parseInt(operands[0]);
-                    reg2 = Integer.parseInt(operands[1]);
-                    machineCodeOctal
-                            .add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg1 << 8) | (reg2 << 6)));
-                }
-                if (instructionComponents[0].equals("NOT")) {
-                    reg1 = Integer.parseInt(operands[0]);
-                    machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg1 << 8)));
-                }
-            }
-
-            else if ((instructionComponents[0].equals("SRC")) || (instructionComponents[0].equals("RRC"))) { // parsing using the opcodes form the hashmaps if the component is related to shift rotate operation
-
-                int opcode = opcodeForShiftRotate.get(instructionComponents[0]);// Get the opcode from the
-                // corresponding hashmap
-
-                String[] operands = instructionComponents[1].split(",");// Spliting and trim the operand list
-                Arrays.setAll(operands, i -> operands[i].trim());
-
-                int a, b, c, d;
-                if (instructionComponents[0].equals("SRC") || instructionComponents[0].equals("RRC")) {
-                    a = Integer.parseInt(operands[0]);
-                    b = Integer.parseInt(operands[1]);
-                    c = Integer.parseInt(operands[2]);
-                    d = Integer.parseInt(operands[3]);
-                    machineCodeOctal.add(String.format("%06o\t%06o", currentAddress,
-                            (opcode << 10) | (a << 8) | (d << 7) | (c << 6) | b));
-                }
-            }
-
-            else if ((instructionComponents[0].equals("IN")) || (instructionComponents[0].equals("OUT"))
-                    || (instructionComponents[0].equals("CHK"))) { //parsing using the opcodes form the hashmaps if the component is related to Input and output opertions
-                // Get the opcode from the map
-                int opcode = opcodeForIO.get(instructionComponents[0]);
-
-                // Split and trim the operand list
-                String[] operands = instructionComponents[1].split(",");
-                Arrays.setAll(operands, i -> operands[i].trim());
-
-                int r, devId;
-                r = Integer.parseInt(operands[0]);
-                devId = Integer.parseInt(operands[1]);
-                machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (r << 8) | devId));
-
-            } else if ((instructionComponents[0].equals("HLT")) || (instructionComponents[0].equals("TRAP"))) { //parsing using the opcodes form the hashmaps if the component is related to Misllaneous operations
-                // Get the opcode from the map
-                int opcode = opcodeForMisallaneous.get(instructionComponents[0]);
-
-                // Switch statement to handle specific instructions like HLT and TRAP
-                switch (instructionComponents[0]) {
-                    case "HLT": // Halt instruction has no operand, return machine code with 0
-                        machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, 0));
-                        break;
-                    case "TRAP": // Trap instruction has an operand, combining both opcode and operand
-                        // Ensuring if there's a second component for the operand
-                        if (instructionComponents.length > 1) {
-                            int operand = Integer.parseInt(instructionComponents[1]);
-                            machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | operand));
-                        } else {
-                            machineCodeOctal.add("ERROR: Missing operand for TRAP instruction!");
-                        }
-                        break;
-                    default: // for handling unknown instructions
-
-                        if (opcode == 0) {// Check if the opcode exists, if not return an error
-                            machineCodeOctal.add("ERROR: Unknown instruction!");
-                        }
-                        machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, opcode));
-                }
-            }
-
-            //TODO: Floating Point SecondPass
-
-            else if ((instructionComponents[0].equals("LDR")) || (instructionComponents[0].equals("STR")) ||
-                    (instructionComponents[0].equals("LDA")) || (instructionComponents[0].equals("LDX")) ||
-                    (instructionComponents[0].equals("STX")) || (instructionComponents[0].equals("SETCCE")) ||
-                    (instructionComponents[0].equals("JZ")) || (instructionComponents[0].equals("JNE")) ||
-                    (instructionComponents[0].equals("JCC")) || (instructionComponents[0].equals("JMA")) ||
-                    (instructionComponents[0].equals("JSR")) || (instructionComponents[0].equals("RFS")) ||
-                    (instructionComponents[0].equals("SOB")) || (instructionComponents[0].equals("JGE")) ||
-                    (instructionComponents[0].equals("AMR")) || (instructionComponents[0].equals("SMR")) ||
-                    (instructionComponents[0].equals("SIR")) || (instructionComponents[0].equals("AIR"))) { // parsing using the opcodes form the hashmaps if the component is related to load , store , jump etc operations.
-                machineCodeOctal.add(lsInstructionParse(instructionComponents));
+            String opcode = instructionComponents[0];
+            java.util.function.BiConsumer<String[], ArrayList<String>> handler = handlerMap.get(opcode);
+            if (handler != null) {
+                handler.accept(instructionComponents, machineCodeOctal);
             } else {
                 machineCodeOctal.add("ERROR: Unknown instruction!");
             }
@@ -354,11 +273,86 @@ public class Assembler {
         }
         System.out.println("\nBinary Code Lines:");
         System.out.println(machineCodeOctal);
-        // Write to files
-        writeDataToFile(LOAD_FILE, machineCodeOctal); // loadfile generation - output file
-        generateListingFile(inputFileLines, LISTING_FILE, machineCodeOctal); //  listing file generation - output file
-        lstWriter.close();
-        objWriter.close();
+        writeDataToFile(LOAD_FILE, machineCodeOctal);
+        generateListingFile(inputFileLines, LISTING_FILE, machineCodeOctal);
+    }
+
+    // Handler for Data
+    private void handleData(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
+        int dataValue;
+        try {
+            dataValue = Integer.parseInt(instructionComponents[1]);
+        } catch (NumberFormatException e) {
+            dataValue = symbolsMap.get(instructionComponents[1]);
+        }
+        machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, dataValue));
+    }
+
+    // Handler for Arithmetic/Logic
+    private void handleArithmeticLogic(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
+        int opcode = opcodeForArithmeticAndLogic.get(instructionComponents[0]);
+        String[] operands = instructionComponents[1].split(",");
+        Arrays.setAll(operands, i -> operands[i].trim());
+        int reg1, reg2;
+        if (instructionComponents[0].equals("AND") || instructionComponents[0].equals("ORR")
+                || instructionComponents[0].equals("MLT") || instructionComponents[0].equals("DVD") || instructionComponents[0].equals("TRR")) {
+            reg1 = Integer.parseInt(operands[0]);
+            reg2 = Integer.parseInt(operands[1]);
+            machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg1 << 8) | (reg2 << 6)));
+        } else if (instructionComponents[0].equals("NOT")) {
+            reg1 = Integer.parseInt(operands[0]);
+            machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg1 << 8)));
+        }
+    }
+
+    // Handler for Shift/Rotate
+    private void handleShiftRotate(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
+        int opcode = opcodeForShiftRotate.get(instructionComponents[0]);
+        String[] operands = instructionComponents[1].split(",");
+        Arrays.setAll(operands, i -> operands[i].trim());
+        int a = Integer.parseInt(operands[0]);
+        int b = Integer.parseInt(operands[1]);
+        int c = Integer.parseInt(operands[2]);
+        int d = Integer.parseInt(operands[3]);
+        machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (a << 8) | (d << 7) | (c << 6) | b));
+    }
+
+    // Handler for IO
+    private void handleIO(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
+        int opcode = opcodeForIO.get(instructionComponents[0]);
+        String[] operands = instructionComponents[1].split(",");
+        Arrays.setAll(operands, i -> operands[i].trim());
+        int r = Integer.parseInt(operands[0]);
+        int devId = Integer.parseInt(operands[1]);
+        machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (r << 8) | devId));
+    }
+
+    // Handler for Miscellaneous (HLT, TRAP)
+    private void handleMisc(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
+        int opcode = opcodeForMisallaneous.get(instructionComponents[0]);
+        switch (instructionComponents[0]) {
+            case "HLT":
+                machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, 0));
+                break;
+            case "TRAP":
+                if (instructionComponents.length > 1) {
+                    int operand = Integer.parseInt(instructionComponents[1]);
+                    machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | operand));
+                } else {
+                    machineCodeOctal.add("ERROR: Missing operand for TRAP instruction!");
+                }
+                break;
+            default:
+                if (opcode == 0) {
+                    machineCodeOctal.add("ERROR: Unknown instruction!");
+                }
+                machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, opcode));
+        }
+    }
+
+    // Handler for Load/Store/Other
+    private void handleLSOther(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
+        machineCodeOctal.add(lsInstructionParse(instructionComponents));
     }
 
     //endregion
