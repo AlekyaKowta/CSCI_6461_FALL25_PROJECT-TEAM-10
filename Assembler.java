@@ -18,36 +18,36 @@ public class Assembler {
     static {
         // Initialize opcode hashmaps
         opcodeForMisallaneous.put("HLT", 000);
-        opcodeForMisallaneous.put("TRAP", 045);
+        opcodeForMisallaneous.put("TRAP", 030);
         opcodeForLSAndOther.put("LDR", 001);
         opcodeForLSAndOther.put("STR", 002);
         opcodeForLSAndOther.put("LDA", 003);
-        opcodeForLSAndOther.put("LDX", 004);
-        opcodeForLSAndOther.put("STX", 005);
-        opcodeForLSAndOther.put("SETCCE", 036);
-        opcodeForLSAndOther.put("JZ", 006);
-        opcodeForLSAndOther.put("JNE", 007);
-        opcodeForLSAndOther.put("JCC", 010);
-        opcodeForLSAndOther.put("JMA", 011);
-        opcodeForLSAndOther.put("JSR", 012);
-        opcodeForLSAndOther.put("RFS", 013);
-        opcodeForLSAndOther.put("SOB", 014);
-        opcodeForLSAndOther.put("JGE", 015);
-        opcodeForLSAndOther.put("AMR", 016);
-        opcodeForLSAndOther.put("SMR", 017);
-        opcodeForLSAndOther.put("AIR", 020);
-        opcodeForLSAndOther.put("SIR", 021);
-        opcodeForArithmeticAndLogic.put("MLT", 022);
-        opcodeForArithmeticAndLogic.put("DVD", 023);
-        opcodeForArithmeticAndLogic.put("TRR", 024);
-        opcodeForArithmeticAndLogic.put("AND", 025);
-        opcodeForArithmeticAndLogic.put("ORR", 026);
-        opcodeForArithmeticAndLogic.put("NOT", 027);
-        opcodeForShiftRotate.put("SRC", 030);
-        opcodeForShiftRotate.put("RRC", 031);
-        opcodeForIO.put("IN", 032);
-        opcodeForIO.put("OUT", 033);
-        opcodeForIO.put("CHK", 034);
+        opcodeForLSAndOther.put("LDX", 041);
+        opcodeForLSAndOther.put("STX", 042);
+        opcodeForLSAndOther.put("SETCCE", 036); //TODO
+        opcodeForLSAndOther.put("JZ", 010);
+        opcodeForLSAndOther.put("JNE", 011);
+        opcodeForLSAndOther.put("JCC", 012);
+        opcodeForLSAndOther.put("JMA", 013);
+        opcodeForLSAndOther.put("JSR", 014);
+        opcodeForLSAndOther.put("RFS", 015);
+        opcodeForLSAndOther.put("SOB", 016);
+        opcodeForLSAndOther.put("JGE", 017);
+        opcodeForLSAndOther.put("AMR", 004);
+        opcodeForLSAndOther.put("SMR", 005);
+        opcodeForLSAndOther.put("AIR", 006);
+        opcodeForLSAndOther.put("SIR", 007);
+        opcodeForArithmeticAndLogic.put("MLT", 070);
+        opcodeForArithmeticAndLogic.put("DVD", 071);
+        opcodeForArithmeticAndLogic.put("TRR", 072);
+        opcodeForArithmeticAndLogic.put("AND", 073);
+        opcodeForArithmeticAndLogic.put("ORR", 074);
+        opcodeForArithmeticAndLogic.put("NOT", 075);
+        opcodeForShiftRotate.put("SRC", 031);
+        opcodeForShiftRotate.put("RRC", 032);
+        opcodeForIO.put("IN", 061);
+        opcodeForIO.put("OUT", 062);
+        opcodeForIO.put("CHK", 063);
         //TODO: Include Floating Point Vectors
     }
 
@@ -57,6 +57,8 @@ public class Assembler {
 
     // 🔹 Symbol Table
     public HashMap<String, Integer> symbolsMap = new HashMap<>();
+
+    // region Helper Methods
 
     /// <summary>
     /// Helper Methods
@@ -158,6 +160,9 @@ public class Assembler {
         }
     }
 
+    //endregion
+
+    //region First and Second passes
     /// <summary>
     /// firstPass Method:
     /// <params> inputFile </params>
@@ -356,6 +361,8 @@ public class Assembler {
         lstWriter.close();
         objWriter.close();
     }
+
+    //endregion
 
     /// <summary>
     /// Main Entry Point
