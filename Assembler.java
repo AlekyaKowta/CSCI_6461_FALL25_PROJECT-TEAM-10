@@ -5,6 +5,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Arrays;
 
 public class Assembler {
     public static final HashMap<String, Integer> opcodeForArithmeticAndLogic = new HashMap<>();
@@ -102,6 +103,78 @@ public class Assembler {
         return inputRows;
     }
 
+    // function for second pass
+    public void secondPass(ArrayList<String> inputFile) throws IOException {
+
+        BufferedWriter lstWriter = new BufferedWriter(new FileWriter(LISTING_FILE));
+        BufferedWriter objWriter = new BufferedWriter(new FileWriter(LOAD_FILE));
+        currentAddress = 0;
+
+        ArrayList<String> binaryLines = new ArrayList<>();
+        int symbolIndex;
+        for (String inputInstruction : inputFile) {
+            if (inputInstruction.startsWith("LOC")) {
+                String locationDirective = "LOC";
+                currentAddress = Integer.parseInt(inputInstruction.substring(locationDirective.length()).trim());
+                binaryLines.add(String.format("%06o\t%06o", currentAddress, 0)); // Initialize memory location with zero value
+                continue;
+            }
+
+            symbolIndex = inputInstruction.indexOf(':'); // Ignoring the label
+            if (symbolIndex != -1) {
+                inputInstruction = inputInstruction.substring(symbolIndex + 1).trim();
+            }
+
+            if (inputInstruction.isEmpty()) { // paasing the empty instruction
+                continue;
+            }
+            String[] instructionComponents = inputInstruction.split("\\s+", 2);
+            if (instructionComponents[0].equals("Data")) {   // parsing using the opcodes form the hashmaps if the component is related to data
+                int dataValue;
+                try {
+                    dataValue = Integer.parseInt(instructionComponents[1]);
+                } catch (NumberFormatException e) {
+                    dataValue = symbolsMap.get(instructionComponents[1]);
+                }
+                binaryLines.add(String.format("%06o\t%06o", currentAddress, dataValue));
+            }
+
+            else if ((instructionComponents[0].equals("AND")) || (instructionComponents[0].equals("ORR"))
+                    || (instructionComponents[0].equals("NOT")) || (instructionComponents[0].equals("MLT"))
+                    || (instructionComponents[0].equals("DVD")) || (instructionComponents[0].equals("TRR"))) { //parsing using the opcodes form the hashmaps if the component is related to arithmetic and logical operations
+                int opcode = opcodeForArithmeticAndLogic.get(instructionComponents[0]);
+
+                // Split and trim the operand list (assuming operands are comma-separated)
+                String[] operands = instructionComponents[1].split(",");
+                Arrays.setAll(operands, i -> operands[i].trim());
+
+                int reg1, reg2;
+
+                if (instructionComponents[0].equals("AND") || instructionComponents[0].equals("ORR")
+                        || instructionComponents[0].equals("MLT")
+                        || instructionComponents[0].equals("DVD") || instructionComponents[0].equals("TRR")) {
+                    reg1 = Integer.parseInt(operands[0]);
+                    reg2 = Integer.parseInt(operands[1]);
+                    binaryLines
+                            .add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg1 << 8) | (reg2 << 6)));
+                }
+                if (instructionComponents[0].equals("NOT")) {
+                    reg1 = Integer.parseInt(operands[0]);
+                    binaryLines.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg1 << 8)));
+                }
+            }
+
+            // TODO : Include other opcodes parsing using the hashmaps
+
+        }
+        System.out.println("\nBinary Code Lines:");
+        System.out.println(binaryLines);
+        // Write to files
+
+        lstWriter.close();
+        objWriter.close();
+    }
+
     // Utility: write to file
     public static void exportDataToFile(String filePath, ArrayList<String> data) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(filePath))) {
@@ -132,6 +205,10 @@ public class Assembler {
             for (String line : inputLines) {
                 System.out.println(line);
             }
+
+            // 🔹 Second pass
+            assembler.secondPass(inputLines);
+            System.out.println("\nAssembly completed. Check listingFile.txt and LoadFile.txt for output.");
 
         } catch (Exception e) {
             e.printStackTrace();
