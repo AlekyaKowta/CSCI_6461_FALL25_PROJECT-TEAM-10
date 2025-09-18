@@ -24,7 +24,6 @@ public class Assembler {
         opcodeForLSAndOther.put("LDA", 003);
         opcodeForLSAndOther.put("LDX", 041);
         opcodeForLSAndOther.put("STX", 042);
-        opcodeForLSAndOther.put("SETCCE", 036); //TODO
         opcodeForLSAndOther.put("JZ", 010);
         opcodeForLSAndOther.put("JNE", 011);
         opcodeForLSAndOther.put("JCC", 012);
