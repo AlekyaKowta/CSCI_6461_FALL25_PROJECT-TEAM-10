@@ -58,6 +58,110 @@ public class Assembler {
     // 🔹 Symbol Table
     public HashMap<String, Integer> symbolsMap = new HashMap<>();
 
+    /// <summary>
+    /// Helper Methods
+    /// </summary>
+
+    // Utility: Export the data to output files as required
+    public static void exportDataToFile(String filePath, ArrayList<String> data) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(filePath))) {
+            for (String line : data) {
+                writer.write(line);
+                writer.newLine();
+            }
+        } catch (IOException exception) {
+            exception.printStackTrace();
+        }
+    }
+
+    // Utility: Write data to file
+    public static void writeDataToFile(String filePath, ArrayList<String> data) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(filePath))) {
+            for (String line : data) {
+                writer.write(line);
+                writer.newLine();
+            }
+        } catch (IOException exception) {
+            exception.printStackTrace();
+        }
+    }
+
+    // Utility: Create a listing file in the specific format
+    public void generateListingFile(ArrayList<String> inputFileLines, String destinationFile, ArrayList<String> output) {
+
+        ArrayList<String> dataToWrite = new ArrayList<>();
+        int maxLines = Math.max(inputFileLines.size(), output.size());
+
+        for (int i = 0; i < maxLines; i++) {
+            String sourceLine = (i < inputFileLines.size()) ? inputFileLines.get(i) : "";
+            String resultLine = (i <=output.size()) ? output.get(i) : "";
+
+            dataToWrite.add(String.format("%-50s %s", resultLine, sourceLine)); // Adjust the format according to your needs
+        }
+        writeDataToFile(destinationFile, dataToWrite);
+    }
+
+    // Utility: Parse the instructions
+    String lsInstructionParse (String[] instructionComponents) {
+        // Get the opcode from the map
+        int opcode = opcodeForLSAndOther.get(instructionComponents[0]);
+
+        // Split and trim the operand list
+        String[] operands = instructionComponents[1].split(",");
+        Arrays.setAll(operands, i -> operands[i].trim());
+
+        int r, a1, address, i;
+
+        switch (instructionComponents[0]) {
+            case "LDR":
+            case "STR":
+            case "LDA":
+            case "JCC":
+            case "SOB":
+            case "JGE":
+            case "AMR":
+            case "SMR":
+                r = Integer.parseInt(operands[0]);
+                a1 = Integer.parseInt(operands[1]);
+                address = Integer.parseInt(operands[2]);
+                i = (operands.length > 3) ? Integer.parseInt(operands[3]) : 0; // Optional operand
+                return String.format("%06o\t%06o", currentAddress,
+                        (opcode << 10) | (r << 8) | (a1 << 6) | (i << 5) | address);
+
+            case "LDX":
+            case "STX":
+            case "JZ":
+            case "JNE":
+            case "JMA":
+            case "JSR":
+                a1 = Integer.parseInt(operands[0]);
+                address = Integer.parseInt(operands[1]);
+                i = (operands.length > 2) ? Integer.parseInt(operands[2]) : 0;
+                return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (a1 << 6) | (i << 5) | address);
+
+            case "SETCCE":
+                r = Integer.parseInt(operands[0]);
+                return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (r << 8));
+
+            case "RFS":
+                address = Integer.parseInt(operands[0]);
+                return String.format("%06o\t%06o", currentAddress, (opcode << 10) | address);
+
+            case "AIR":
+            case "SIR":
+                r = Integer.parseInt(operands[0]);
+                address = Integer.parseInt(operands[1]);
+                return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (r << 8) | address);
+
+            default:
+                return "ERROR: Unknown or invalid instruction!";
+        }
+    }
+
+    /// <summary>
+    /// firstPass Method:
+    /// <params> inputFile </params>
+    /// </summary>
     public ArrayList<String> firstPass(String inputFile) throws Exception {
         BufferedReader reader = new BufferedReader(new FileReader(inputFile));
         ArrayList<String> inputRows = new ArrayList<>();
@@ -103,8 +207,11 @@ public class Assembler {
         return inputRows;
     }
 
-    // function for second pass
-    public void secondPass(ArrayList<String> inputFile) throws IOException {
+    /// <summary>
+    /// Second Pass Method:
+    /// <params> inputFileLines</params>
+    /// </summary>
+    public void secondPass(ArrayList<String> inputFileLines) throws IOException {
 
         BufferedWriter lstWriter = new BufferedWriter(new FileWriter(LISTING_FILE));
         BufferedWriter objWriter = new BufferedWriter(new FileWriter(LOAD_FILE));
@@ -112,7 +219,7 @@ public class Assembler {
 
         ArrayList<String> binaryLines = new ArrayList<>();
         int symbolIndex;
-        for (String inputInstruction : inputFile) {
+        for (String inputInstruction : inputFileLines) {
             if (inputInstruction.startsWith("LOC")) {
                 String locationDirective = "LOC";
                 currentAddress = Integer.parseInt(inputInstruction.substring(locationDirective.length()).trim());
@@ -164,29 +271,95 @@ public class Assembler {
                 }
             }
 
-            // TODO : Include other opcodes parsing using the hashmaps
+            else if ((instructionComponents[0].equals("SRC")) || (instructionComponents[0].equals("RRC"))) { // parsing using the opcodes form the hashmaps if the component is related to shift rotate operation
 
+                int opcode = opcodeForShiftRotate.get(instructionComponents[0]);// Get the opcode from the
+                // corresponding hashmap
+
+                String[] operands = instructionComponents[1].split(",");// Spliting and trim the operand list
+                Arrays.setAll(operands, i -> operands[i].trim());
+
+                int a, b, c, d;
+                if (instructionComponents[0].equals("SRC") || instructionComponents[0].equals("RRC")) {
+                    a = Integer.parseInt(operands[0]);
+                    b = Integer.parseInt(operands[1]);
+                    c = Integer.parseInt(operands[2]);
+                    d = Integer.parseInt(operands[3]);
+                    binaryLines.add(String.format("%06o\t%06o", currentAddress,
+                            (opcode << 10) | (a << 8) | (d << 7) | (c << 6) | b));
+                }
+            }
+
+            else if ((instructionComponents[0].equals("IN")) || (instructionComponents[0].equals("OUT"))
+                    || (instructionComponents[0].equals("CHK"))) { //parsing using the opcodes form the hashmaps if the component is related to Input and output opertions
+                // Get the opcode from the map
+                int opcode = opcodeForIO.get(instructionComponents[0]);
+
+                // Split and trim the operand list
+                String[] operands = instructionComponents[1].split(",");
+                Arrays.setAll(operands, i -> operands[i].trim());
+
+                int r, devId;
+                r = Integer.parseInt(operands[0]);
+                devId = Integer.parseInt(operands[1]);
+                binaryLines.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (r << 8) | devId));
+
+            } else if ((instructionComponents[0].equals("HLT")) || (instructionComponents[0].equals("TRAP"))) { //parsing using the opcodes form the hashmaps if the component is related to Misllaneous operations
+                // Get the opcode from the map
+                int opcode = opcodeForMisallaneous.get(instructionComponents[0]);
+
+                // Switch statement to handle specific instructions like HLT and TRAP
+                switch (instructionComponents[0]) {
+                    case "HLT": // Halt instruction has no operand, return machine code with 0
+                        binaryLines.add(String.format("%06o\t%06o", currentAddress, 0));
+                        break;
+                    case "TRAP": // Trap instruction has an operand, combining both opcode and operand
+                        // Ensuring if there's a second component for the operand
+                        if (instructionComponents.length > 1) {
+                            int operand = Integer.parseInt(instructionComponents[1]);
+                            binaryLines.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | operand));
+                        } else {
+                            binaryLines.add("ERROR: Missing operand for TRAP instruction!");
+                        }
+                        break;
+                    default: // for handling unknown instructions
+
+                        if (opcode == 0) {// Check if the opcode exists, if not return an error
+                            binaryLines.add("ERROR: Unknown instruction!");
+                        }
+                        binaryLines.add(String.format("%06o\t%06o", currentAddress, opcode));
+                }
+            }
+
+            //TODO: Floating Point SecondPass
+
+            else if ((instructionComponents[0].equals("LDR")) || (instructionComponents[0].equals("STR")) ||
+                    (instructionComponents[0].equals("LDA")) || (instructionComponents[0].equals("LDX")) ||
+                    (instructionComponents[0].equals("STX")) || (instructionComponents[0].equals("SETCCE")) ||
+                    (instructionComponents[0].equals("JZ")) || (instructionComponents[0].equals("JNE")) ||
+                    (instructionComponents[0].equals("JCC")) || (instructionComponents[0].equals("JMA")) ||
+                    (instructionComponents[0].equals("JSR")) || (instructionComponents[0].equals("RFS")) ||
+                    (instructionComponents[0].equals("SOB")) || (instructionComponents[0].equals("JGE")) ||
+                    (instructionComponents[0].equals("AMR")) || (instructionComponents[0].equals("SMR")) ||
+                    (instructionComponents[0].equals("SIR")) || (instructionComponents[0].equals("AIR"))) { // parsing using the opcodes form the hashmaps if the component is related to load , store , jump etc operations.
+                binaryLines.add(lsInstructionParse(instructionComponents));
+            } else {
+                binaryLines.add("ERROR: Unknown instruction!");
+            }
+            currentAddress++;
         }
         System.out.println("\nBinary Code Lines:");
         System.out.println(binaryLines);
         // Write to files
-
+        writeDataToFile(LOAD_FILE, machineCodeList); // loadfile generation - output file
+        generateListingFile(inputFileLines, LISTING_FILE, machineCodeList); //  listing file generation
         lstWriter.close();
         objWriter.close();
     }
 
-    // Utility: write to file
-    public static void exportDataToFile(String filePath, ArrayList<String> data) {
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(filePath))) {
-            for (String line : data) {
-                writer.write(line);
-                writer.newLine();
-            }
-        } catch (IOException exception) {
-            exception.printStackTrace();
-        }
-    }
-
+    /// <summary>
+    /// Main Entry Point
+    /// </summary>
     public static void main(String[] args) {
         try {
             Assembler assembler = new Assembler();
