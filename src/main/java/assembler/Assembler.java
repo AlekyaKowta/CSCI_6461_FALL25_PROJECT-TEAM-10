@@ -165,56 +165,12 @@ public class Assembler {
     //endregion
 
     //region First and Second passes
+
     /// <summary>
-    /// Reads source program, strips comments, collects labels and addresses, prepares cleaned input lines for assembly.
+    /// Reads source program, strips comments, preserves original Lines, collects labels and addresses, prepares cleaned input lines for assembly.
     /// </summary>
     /// <param name="inputFile">File path to source code</param>
     /// <returns>List of cleaned source lines</returns>
-    public ArrayList<String> firstPass(String inputFile) throws IOException {
-        BufferedReader reader = new BufferedReader(new FileReader(inputFile));
-        ArrayList<String> inputRows = new ArrayList<>();
-        String row;
-
-        // Read and clean comments
-        while ((row = reader.readLine()) != null) {
-            int commentIndex = row.indexOf(';');
-            if (commentIndex != -1) {
-                row = row.substring(0, commentIndex).trim();
-            } else {
-                row = row.trim();
-            }
-            if (!row.isEmpty()) {
-                inputRows.add(row);
-            }
-        }
-        reader.close();
-
-        // Parse symbols & update currentAddress
-        for (String line : inputRows) {
-            // LOC directive
-            if (line.startsWith("LOC")) {
-                String locationString = "LOC";
-                currentAddress = Integer.parseInt(line.substring(locationString.length()).trim());
-                continue;
-            }
-
-            // Label handling (e.g., End:)
-            int symbolIndex = line.indexOf(':');
-            if (symbolIndex != -1) {
-                String label = line.substring(0, symbolIndex).trim();
-                symbolsMap.put(label, currentAddress);
-                line = line.substring(symbolIndex + 1).trim(); // Remaining part after label
-            }
-
-            // Instructions or data → increment address
-            if (!line.isEmpty()) {
-                currentAddress++;
-            }
-        }
-
-        return inputRows;
-    }
-
     public ArrayList<String> firstPassWithComments(String inputFile, ArrayList<String> originalLines) throws IOException {
         BufferedReader reader = new BufferedReader(new FileReader(inputFile));
         ArrayList<String> cleanLines = new ArrayList<>();
@@ -235,7 +191,7 @@ public class Assembler {
         }
         reader.close();
 
-        // Symbol table build on clean lines, same logic as original firstPass
+        // Symbol table build on clean lines
         for (String line : cleanLines) {
             if (line.startsWith("LOC")) {
                 String locationString = "LOC";
@@ -417,10 +373,9 @@ public class Assembler {
             Assembler assembler = new Assembler();
 
             ArrayList<String> originalLines = new ArrayList<>();
-            ArrayList<String> cleanedLines = assembler.firstPassWithComments("sourceProgram.txt", originalLines);
 
-            // First pass
-            //ArrayList<String> inputLines = assembler.firstPass("sourceProgram.txt");
+            // First Pass
+            ArrayList<String> cleanedLines = assembler.firstPassWithComments("sourceProgram.txt", originalLines);
 
             // Debug: print symbol table
             System.out.println("Symbol Table:");
@@ -435,7 +390,6 @@ public class Assembler {
             }
 
             // Second pass
-            //assembler.secondPass(inputLines);
             assembler.secondPass(cleanedLines);
             //Generate Listing File
             assembler.generateListingFile(originalLines, assembler.LISTING_FILE, assembler.machineCodeOctal);
