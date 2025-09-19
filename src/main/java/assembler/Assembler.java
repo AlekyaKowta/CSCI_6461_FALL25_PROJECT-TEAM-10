@@ -11,20 +11,21 @@ import java.util.Arrays;
 
 public class Assembler {
 
-    public int currentAddress = 0; // Tracks current address
+    // Tracks current address during assembly
+    public int currentAddress = 0;
+
+    // Output file names
     public String LISTING_FILE = "ListingFile.txt";
     public String LOAD_FILE = "LoadFile.txt";
 
-    // Symbol Table
+    // Symbol Table mapping labels to addresses
     public HashMap<String, Integer> symbolsMap = new HashMap<>();
 
     // region Helper Methods
 
     /// <summary>
-    /// Helper Methods
+    /// Writes list of output lines to a file.
     /// </summary>
-
-    // Utility: Write data to file
     public static void writeDataToFile(String filePath, ArrayList<String> data) {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(filePath))) {
             for (String line : data) {
@@ -36,7 +37,12 @@ public class Assembler {
         }
     }
 
-    // Utility: Create a listing file in the specific format
+    /// <summary>
+    /// Generates the assembly listing file which includes source lines alongside their machine code.
+    /// </summary>
+    /// <param name="inputFileLines">List of source input lines</param>
+    /// <param name="destinationFile">Path of output listing file</param>
+    /// <param name="output">Generated machine code lines aligned with source</param>
     public void generateListingFile(ArrayList<String> inputFileLines, String destinationFile, ArrayList<String> output) {
 
         ArrayList<String> dataToWrite = new ArrayList<>();
@@ -55,14 +61,23 @@ public class Assembler {
         writeDataToFile(destinationFile, dataToWrite);
     }
 
-    // Parsing Operands
+    /// <summary>
+    /// Splits operand string by comma and trims whitespace from each operand.
+    /// </summary>
+    /// <param name="operandString">Raw operand string</param>
+    /// <returns>Array of trimmed operand strings</returns>
     private String[] parseOperands(String operandString) {
         String[] ops = operandString.split(",");
         Arrays.setAll(ops, i -> ops[i].trim());
         return ops;
     }
 
-    // Utility: Parse the instructions
+    /// <summary>
+    /// Parses load/store and related instructions into machine code words.
+    /// Instructions supported vary and have different formats; handled via switch-case.
+    /// </summary>
+    /// <param name="instructionComponents">OpCode and operand string array</param>
+    /// <returns>Formatted string: octal address and machine code</returns>
     String lsInstructionParse(String[] instructionComponents) {
         // Get the opcode based on instruction mnemonic
         int opcode = OpCodeTables.loadStoreOther.get(instructionComponents[0]);
@@ -75,6 +90,7 @@ public class Assembler {
         // address: Memory address or label resolved to integer
         // indirect: Indirect addressing bit (optional)
         int reg, idx, address, indirect;
+
         // Instructions with format: opcode r,x,address[,i]
         switch (instructionComponents[0]) {
             case "LDR":
@@ -130,9 +146,10 @@ public class Assembler {
 
     //region First and Second passes
     /// <summary>
-    /// firstPass Method:
-    /// <params> inputFile </params>
+    /// Reads source program, strips comments, collects labels and addresses, prepares cleaned input lines for assembly.
     /// </summary>
+    /// <param name="inputFile">File path to source code</param>
+    /// <returns>List of cleaned source lines</returns>
     public ArrayList<String> firstPass(String inputFile) throws IOException {
         BufferedReader reader = new BufferedReader(new FileReader(inputFile));
         ArrayList<String> inputRows = new ArrayList<>();
@@ -179,9 +196,9 @@ public class Assembler {
     }
 
     /// <summary>
-    /// Second Pass Method:
-    /// <params> inputFileLines</params>
+    /// Second pass assembles machine codes line by line using appropriate handlers based on opcode.
     /// </summary>
+    /// <param name="inputFileLines">List of cleaned source lines from first pass</param>
     public void secondPass(ArrayList<String> inputFileLines) throws IOException {
         // Handler map for opcodes
         java.util.Map<String, java.util.function.BiConsumer<String[], ArrayList<String>>> handlerMap = new java.util.HashMap<>();
@@ -205,6 +222,7 @@ public class Assembler {
         handlerMap.put("TRAP", this::handleMisc);
         // Load/Store/Jump/Other
         String[] lsOps = {"LDR","STR","LDA","LDX","STX","SETCCE","JZ","JNE","JCC","JMA","JSR","RFS","SOB","JGE","AMR","SMR","SIR","AIR"};
+
         for (String op : lsOps) handlerMap.put(op, this::handleLSOther);
 
         currentAddress = 0;
@@ -239,7 +257,9 @@ public class Assembler {
         generateListingFile(inputFileLines, LISTING_FILE, machineCodeOctal);
     }
 
-    // Handler for Data
+    /// <summary>
+    /// Additional Helper Methods for secondPass
+    /// </summary>
     private void handleData(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
         int dataValue;
         String operand = instructionComponents[1];
@@ -251,7 +271,9 @@ public class Assembler {
         machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, dataValue));
     }
 
-    // Handler for Arithmetic/Logic
+    /// <summary>
+    /// Additional Helper Methods for secondPass: Arithmetic and Logic
+    /// </summary>
     private void handleArithmeticLogic(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
         int opcode = OpCodeTables.arithmeticAndLogic.get(instructionComponents[0]);
         String[] operands = parseOperands(instructionComponents[1]);
@@ -267,7 +289,9 @@ public class Assembler {
         }
     }
 
-    // Handler for Shift/Rotate
+    /// <summary>
+    /// Additional Helper Methods for secondPass: Shift Rotate
+    /// </summary>
     private void handleShiftRotate(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
         int opcode = OpCodeTables.shiftRotate.get(instructionComponents[0]);
         String[] operands = parseOperands(instructionComponents[1]);
@@ -278,7 +302,9 @@ public class Assembler {
         machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (a << 8) | (d << 7) | (c << 6) | b));
     }
 
-    // Handler for IO
+    /// <summary>
+    /// Additional Helper Methods for secondPass: IO
+    /// </summary>
     private void handleIO(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
         int opcode = OpCodeTables.io.get(instructionComponents[0]);
         String[] operands = parseOperands(instructionComponents[1]);
@@ -288,7 +314,9 @@ public class Assembler {
         machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (r << 8) | devId));
     }
 
-    // Handler for Miscellaneous (HLT, TRAP)
+    /// <summary>
+    /// Additional Helper Methods for secondPass: Miscellaneous
+    /// </summary>
     private void handleMisc(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
         int opcode = OpCodeTables.miscellaneous.get(instructionComponents[0]);
         switch (instructionComponents[0]) {
@@ -311,7 +339,9 @@ public class Assembler {
         }
     }
 
-    // Handler for Load/Store/Other
+    /// <summary>
+    /// Additional Helper Methods for secondPass: Load Store and Other
+    /// </summary>
     private void handleLSOther(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
         machineCodeOctal.add(lsInstructionParse(instructionComponents));
     }
@@ -319,13 +349,13 @@ public class Assembler {
     //endregion
 
     /// <summary>
-    /// Main Entry Point
+    /// Main method to run assembler: reads source file, performs assembly passes, and writes outputs.
     /// </summary>
     public static void main(String[] args) {
         try {
             Assembler assembler = new Assembler();
 
-            // 🔹 First pass
+            // First pass
             ArrayList<String> inputLines = assembler.firstPass("sourceProgram.txt");
 
             // Debug: print symbol table
