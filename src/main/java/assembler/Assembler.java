@@ -73,6 +73,25 @@ public class Assembler {
     }
 
     /// <summary>
+    /// Before parsing the operand as an integer, check if it is a label and get its numeric address from the symbol table
+    /// </summary>
+    private int resolveOperandToAddress(String operand) {
+        if (symbolsMap.containsKey(operand)) {
+            return symbolsMap.get(operand);
+        } else {
+            try{
+                return Integer.parseInt(operand);
+            }
+            catch(NumberFormatException e) {
+                // The operand is not a defined label AND it's not a valid number.
+                // This is a fatal "Undefined Symbol" error that must be reported.
+                throw new IllegalArgumentException("Undefined symbol '" + operand + "'.");
+            }
+
+        }
+    }
+
+    /// <summary>
     /// Parses load/store and related instructions into machine code words.
     /// Instructions supported vary and have different formats; handled via switch-case.
     /// </summary>
@@ -107,7 +126,7 @@ public class Assembler {
             case "SMR":
                 reg = Integer.parseInt(operands[0]);
                 idx = Integer.parseInt(operands[1]);
-                address = Integer.parseInt(operands[2]);
+                address = resolveOperandToAddress(operands[2]);
                 indirect = (operands.length > 3) ? Integer.parseInt(operands[3]) : 0; // Optional operand
                 return String.format("%06o\t%06o", currentAddress,
                         (opcode << 10) | (reg << 8) | (idx << 6) | (indirect << 5) | address);
@@ -116,7 +135,7 @@ public class Assembler {
             case "LDX":
             case "STX":
                 idx = Integer.parseInt(operands[0]);
-                address = Integer.parseInt(operands[1]);
+                address = resolveOperandToAddress(operands[1]);
                 indirect = (operands.length > 2) ? Integer.parseInt(operands[2]) : 0;
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (idx << 6) | (indirect << 5) | address);
 
@@ -127,14 +146,14 @@ public class Assembler {
 
             // Instructions with format: opcode address
             case "RFS":
-                address = Integer.parseInt(operands[0]);
+                address = resolveOperandToAddress(operands[0]);
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | address);
 
             // Instructions with format: opcode r,address
             case "AIR":
             case "SIR":
                 reg = Integer.parseInt(operands[0]);
-                address = Integer.parseInt(operands[1]);
+                address = resolveOperandToAddress(operands[1]);
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg << 8) | address);
 
             default:
@@ -374,8 +393,16 @@ public class Assembler {
             assembler.secondPass(inputLines);
             System.out.println("\nAssembly completed. Check listingFile.txt and LoadFile.txt for output.");
 
+        } catch (IllegalArgumentException e) {
+            System.err.println("ASSEMBLER FATAL ERROR: " + e.getMessage());
+            System.exit(1);
+        } catch (IOException e) {
+            System.err.println("FILE I/O ERROR: " + e.getMessage());
+            System.exit(1);
         } catch (Exception e) {
+            System.err.println("UNEXPECTED ERROR: " + e.getMessage());
             e.printStackTrace();
+            System.exit(1);
         }
     }
 }
