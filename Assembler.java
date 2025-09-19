@@ -107,7 +107,7 @@ public class Assembler {
     }
 
     // Utility: Parse the instructions
-    String lsInstructionParse (String[] instructionComponents) {
+    String lsInstructionParse(String[] instructionComponents) {
         // Get the opcode from the map
         int opcode = opcodeForLSAndOther.get(instructionComponents[0]);
 
@@ -115,35 +115,34 @@ public class Assembler {
         String[] operands = instructionComponents[1].split(",");
         Arrays.setAll(operands, i -> operands[i].trim());
 
-        int r, a1, address, i;
+        int r, x, address, i; // Changed 'a1' to 'x' to be more descriptive
 
         switch (instructionComponents[0]) {
             case "LDR":
             case "STR":
             case "LDA":
             case "JCC":
+            case "JZ":
+            case "JNE":
+            case "JMA":
+            case "JSR":
             case "SOB":
             case "JGE":
             case "AMR":
             case "SMR":
                 r = Integer.parseInt(operands[0]);
-                a1 = Integer.parseInt(operands[1]);
-                i = (operands.length > 3) ? Integer.parseInt(operands[3]) : 0; // Optional operand
+                x = Integer.parseInt(operands[1]);
                 address = Integer.parseInt(operands[2]);
+                i = (operands.length > 3) ? Integer.parseInt(operands[3]) : 0; // Optional operand
                 return String.format("%06o\t%06o", currentAddress,
-                        (opcode << 10) | (r << 8) | (a1 << 6) | (i << 5) | address);
+                        (opcode << 10) | (r << 8) | (x << 6) | (i << 5) | address);
 
             case "LDX":
             case "STX":
-            case "JZ":
-            case "JNE":
-            case "JMA":
-            case "JSR":
-                a1 = Integer.parseInt(operands[0]); // First operand (register)
-                address = Integer.parseInt(operands[1]); // Address (memory location)
-                i = (operands.length > 2) ? Integer.parseInt(operands[2]) : 0; // Optional condition flag
-                // Ensure the correct bitwise operations, and shift the operands accordingly
-                return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (a1 << 6) | (i << 5) | address);
+                x = Integer.parseInt(operands[0]);
+                address = Integer.parseInt(operands[1]);
+                i = (operands.length > 2) ? Integer.parseInt(operands[2]) : 0;
+                return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (x << 6) | (i << 5) | address);
 
             case "SETCCE":
                 r = Integer.parseInt(operands[0]);
