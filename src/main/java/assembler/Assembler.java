@@ -21,6 +21,9 @@ public class Assembler {
     // Symbol Table mapping labels to addresses
     public HashMap<String, Integer> symbolsMap = new HashMap<>();
 
+    // Expose machine code list for access after second pass
+    public ArrayList<String> machineCodeOctal = new ArrayList<>();
+
     // region Helper Methods
 
     /// <summary>
@@ -46,8 +49,6 @@ public class Assembler {
     public void generateListingFile(ArrayList<String> inputFileLines, String destinationFile, ArrayList<String> output) {
 
         ArrayList<String> dataToWrite = new ArrayList<>();
-        int maxLines = Math.max(inputFileLines.size(), output.size());
-
         int outputIndex = 0;
         for (int i = 0; i < inputFileLines.size(); i++) {
             String sourceLine = inputFileLines.get(i);
@@ -70,6 +71,25 @@ public class Assembler {
         String[] ops = operandString.split(",");
         Arrays.setAll(ops, i -> ops[i].trim());
         return ops;
+    }
+
+    /// <summary>
+    /// Before parsing the operand as an integer, check if it is a label and get its numeric address from the symbol table
+    /// </summary>
+    private int resolveOperandToAddress(String operand) {
+        if (symbolsMap.containsKey(operand)) {
+            return symbolsMap.get(operand);
+        } else {
+            try{
+                return Integer.parseInt(operand);
+            }
+            catch(NumberFormatException e) {
+                // The operand is not a defined label AND it's not a valid number.
+                // This is a fatal "Undefined Symbol" error that must be reported.
+                throw new IllegalArgumentException("Undefined symbol '" + operand + "'.");
+            }
+
+        }
     }
 
     /// <summary>
@@ -107,7 +127,7 @@ public class Assembler {
             case "SMR":
                 reg = Integer.parseInt(operands[0]);
                 idx = Integer.parseInt(operands[1]);
-                address = Integer.parseInt(operands[2]);
+                address = resolveOperandToAddress(operands[2]);
                 indirect = (operands.length > 3) ? Integer.parseInt(operands[3]) : 0; // Optional operand
                 return String.format("%06o\t%06o", currentAddress,
                         (opcode << 10) | (reg << 8) | (idx << 6) | (indirect << 5) | address);
@@ -116,7 +136,7 @@ public class Assembler {
             case "LDX":
             case "STX":
                 idx = Integer.parseInt(operands[0]);
-                address = Integer.parseInt(operands[1]);
+                address = resolveOperandToAddress(operands[1]);
                 indirect = (operands.length > 2) ? Integer.parseInt(operands[2]) : 0;
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (idx << 6) | (indirect << 5) | address);
 
@@ -127,14 +147,14 @@ public class Assembler {
 
             // Instructions with format: opcode address
             case "RFS":
-                address = Integer.parseInt(operands[0]);
+                address = resolveOperandToAddress(operands[0]);
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | address);
 
             // Instructions with format: opcode r,address
             case "AIR":
             case "SIR":
                 reg = Integer.parseInt(operands[0]);
-                address = Integer.parseInt(operands[1]);
+                address = resolveOperandToAddress(operands[1]);
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg << 8) | address);
 
             default:
@@ -145,54 +165,51 @@ public class Assembler {
     //endregion
 
     //region First and Second passes
+
     /// <summary>
-    /// Reads source program, strips comments, collects labels and addresses, prepares cleaned input lines for assembly.
+    /// Reads source program, strips comments, preserves original Lines, collects labels and addresses, prepares cleaned input lines for assembly.
     /// </summary>
     /// <param name="inputFile">File path to source code</param>
     /// <returns>List of cleaned source lines</returns>
-    public ArrayList<String> firstPass(String inputFile) throws IOException {
+    public ArrayList<String> firstPassWithComments(String inputFile, ArrayList<String> originalLines) throws IOException {
         BufferedReader reader = new BufferedReader(new FileReader(inputFile));
-        ArrayList<String> inputRows = new ArrayList<>();
+        ArrayList<String> cleanLines = new ArrayList<>();
         String row;
 
-        // Read and clean comments
         while ((row = reader.readLine()) != null) {
+            originalLines.add(row);  // preserve comment lines
+            String clean = row;
             int commentIndex = row.indexOf(';');
             if (commentIndex != -1) {
-                row = row.substring(0, commentIndex).trim();
+                clean = row.substring(0, commentIndex).trim();
             } else {
-                row = row.trim();
+                clean = row.trim();
             }
-            if (!row.isEmpty()) {
-                inputRows.add(row);
+            if (!clean.isEmpty()) {
+                cleanLines.add(clean);
             }
         }
         reader.close();
 
-        // Parse symbols & update currentAddress
-        for (String line : inputRows) {
-            // LOC directive
+        // Symbol table build on clean lines
+        for (String line : cleanLines) {
             if (line.startsWith("LOC")) {
                 String locationString = "LOC";
                 currentAddress = Integer.parseInt(line.substring(locationString.length()).trim());
                 continue;
             }
 
-            // Label handling (e.g., End:)
             int symbolIndex = line.indexOf(':');
             if (symbolIndex != -1) {
                 String label = line.substring(0, symbolIndex).trim();
                 symbolsMap.put(label, currentAddress);
-                line = line.substring(symbolIndex + 1).trim(); // Remaining part after label
             }
 
-            // Instructions or data → increment address
             if (!line.isEmpty()) {
                 currentAddress++;
             }
         }
-
-        return inputRows;
+        return cleanLines;
     }
 
     /// <summary>
@@ -226,7 +243,7 @@ public class Assembler {
         for (String op : lsOps) handlerMap.put(op, this::handleLSOther);
 
         currentAddress = 0;
-        ArrayList<String> machineCodeOctal = new ArrayList<>();
+        machineCodeOctal.clear();
         int symbolIndex;
         for (String inputInstruction : inputFileLines) {
             if (inputInstruction.startsWith("LOC")) {
@@ -254,7 +271,7 @@ public class Assembler {
         System.out.println("\nBinary Code Lines:");
         System.out.println(machineCodeOctal);
         writeDataToFile(LOAD_FILE, machineCodeOctal);
-        generateListingFile(inputFileLines, LISTING_FILE, machineCodeOctal);
+        //generateListingFile(inputFileLines, LISTING_FILE, machineCodeOctal);
     }
 
     /// <summary>
@@ -355,8 +372,10 @@ public class Assembler {
         try {
             Assembler assembler = new Assembler();
 
-            // First pass
-            ArrayList<String> inputLines = assembler.firstPass("sourceProgram.txt");
+            ArrayList<String> originalLines = new ArrayList<>();
+
+            // First Pass
+            ArrayList<String> cleanedLines = assembler.firstPassWithComments("sourceProgram.txt", originalLines);
 
             // Debug: print symbol table
             System.out.println("Symbol Table:");
@@ -365,17 +384,27 @@ public class Assembler {
             }
 
             // Debug: print cleaned input lines
-            System.out.println("\nCleaned Input Lines:");
-            for (String line : inputLines) {
+            System.out.println("\nOriginal Input Lines:");
+            for (String line : originalLines) {
                 System.out.println(line);
             }
 
             // Second pass
-            assembler.secondPass(inputLines);
+            assembler.secondPass(cleanedLines);
+            //Generate Listing File
+            assembler.generateListingFile(originalLines, assembler.LISTING_FILE, assembler.machineCodeOctal);
             System.out.println("\nAssembly completed. Check listingFile.txt and LoadFile.txt for output.");
 
+        } catch (IllegalArgumentException e) {
+            System.err.println("ASSEMBLER FATAL ERROR: " + e.getMessage());
+            System.exit(1);
+        } catch (IOException e) {
+            System.err.println("FILE I/O ERROR: " + e.getMessage());
+            System.exit(1);
         } catch (Exception e) {
+            System.err.println("UNEXPECTED ERROR: " + e.getMessage());
             e.printStackTrace();
+            System.exit(1);
         }
     }
 }
