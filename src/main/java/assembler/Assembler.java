@@ -10,53 +10,12 @@ import java.util.HashMap;
 import java.util.Arrays;
 
 public class Assembler {
-    public static final HashMap<String, Integer> opcodeForArithmeticAndLogic = new HashMap<>();
-    public static final HashMap<String, Integer> opcodeForShiftRotate = new HashMap<>();
-    public static final HashMap<String, Integer> opcodeForIO = new HashMap<>();
-    public static final HashMap<String, Integer> opcodeForLSAndOther = new HashMap<>();
-    public static final HashMap<String, Integer> opcodeForMisallaneous = new HashMap<>();
-    //TODO: Include Floating Point Vectors
-
-    static {
-        // Initialize opcode hashmaps
-        opcodeForMisallaneous.put("HLT", 000);
-        opcodeForMisallaneous.put("TRAP", 030);
-        opcodeForLSAndOther.put("LDR", 001);
-        opcodeForLSAndOther.put("STR", 002);
-        opcodeForLSAndOther.put("LDA", 003);
-        opcodeForLSAndOther.put("LDX", 041);
-        opcodeForLSAndOther.put("STX", 042);
-        opcodeForLSAndOther.put("JZ", 010);
-        opcodeForLSAndOther.put("JNE", 011);
-        opcodeForLSAndOther.put("JCC", 012);
-        opcodeForLSAndOther.put("JMA", 013);
-        opcodeForLSAndOther.put("JSR", 014);
-        opcodeForLSAndOther.put("RFS", 015);
-        opcodeForLSAndOther.put("SOB", 016);
-        opcodeForLSAndOther.put("JGE", 017);
-        opcodeForLSAndOther.put("AMR", 004);
-        opcodeForLSAndOther.put("SMR", 005);
-        opcodeForLSAndOther.put("AIR", 006);
-        opcodeForLSAndOther.put("SIR", 007);
-        opcodeForArithmeticAndLogic.put("MLT", 070);
-        opcodeForArithmeticAndLogic.put("DVD", 071);
-        opcodeForArithmeticAndLogic.put("TRR", 072);
-        opcodeForArithmeticAndLogic.put("AND", 073);
-        opcodeForArithmeticAndLogic.put("ORR", 074);
-        opcodeForArithmeticAndLogic.put("NOT", 075);
-        opcodeForShiftRotate.put("SRC", 031);
-        opcodeForShiftRotate.put("RRC", 032);
-        opcodeForIO.put("IN", 061);
-        opcodeForIO.put("OUT", 062);
-        opcodeForIO.put("CHK", 063);
-        //TODO: Include Floating Point Vectors
-    }
 
     public int currentAddress = 0; // Tracks current address
-    public String LISTING_FILE = "listingFile.txt"; 
+    public String LISTING_FILE = "ListingFile.txt";
     public String LOAD_FILE = "LoadFile.txt";
 
-    // 🔹 Symbol Table
+    // Symbol Table
     public HashMap<String, Integer> symbolsMap = new HashMap<>();
 
     // region Helper Methods
@@ -64,18 +23,6 @@ public class Assembler {
     /// <summary>
     /// Helper Methods
     /// </summary>
-
-    // Utility: Export the data to output files as required
-    public static void exportDataToFile(String filePath, ArrayList<String> data) {
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(filePath))) {
-            for (String line : data) {
-                writer.write(line);
-                writer.newLine();
-            }
-        } catch (IOException exception) {
-            exception.printStackTrace();
-        }
-    }
 
     // Utility: Write data to file
     public static void writeDataToFile(String filePath, ArrayList<String> data) {
@@ -111,7 +58,7 @@ public class Assembler {
     // Utility: Parse the instructions
     String lsInstructionParse(String[] instructionComponents) {
         // Get the opcode from the map
-        int opcode = opcodeForLSAndOther.get(instructionComponents[0]);
+        int opcode = OpCodeTables.loadStoreOther.get(instructionComponents[0]);
 
         // Split and trim the operand list
         String[] operands = instructionComponents[1].split(",");
@@ -172,7 +119,7 @@ public class Assembler {
     /// firstPass Method:
     /// <params> inputFile </params>
     /// </summary>
-    public ArrayList<String> firstPass(String inputFile) throws Exception {
+    public ArrayList<String> firstPass(String inputFile) throws IOException {
         BufferedReader reader = new BufferedReader(new FileReader(inputFile));
         ArrayList<String> inputRows = new ArrayList<>();
         String row;
@@ -191,7 +138,7 @@ public class Assembler {
         }
         reader.close();
 
-        // 🔹 Parse symbols & update currentAddress
+        // Parse symbols & update currentAddress
         for (String line : inputRows) {
             // LOC directive
             if (line.startsWith("LOC")) {
@@ -291,7 +238,7 @@ public class Assembler {
 
     // Handler for Arithmetic/Logic
     private void handleArithmeticLogic(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
-        int opcode = opcodeForArithmeticAndLogic.get(instructionComponents[0]);
+        int opcode = OpCodeTables.arithmeticAndLogic.get(instructionComponents[0]);
         String[] operands = instructionComponents[1].split(",");
         Arrays.setAll(operands, i -> operands[i].trim());
         int reg1, reg2;
@@ -308,7 +255,7 @@ public class Assembler {
 
     // Handler for Shift/Rotate
     private void handleShiftRotate(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
-        int opcode = opcodeForShiftRotate.get(instructionComponents[0]);
+        int opcode = OpCodeTables.shiftRotate.get(instructionComponents[0]);
         String[] operands = instructionComponents[1].split(",");
         Arrays.setAll(operands, i -> operands[i].trim());
         int a = Integer.parseInt(operands[0]);
@@ -320,7 +267,7 @@ public class Assembler {
 
     // Handler for IO
     private void handleIO(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
-        int opcode = opcodeForIO.get(instructionComponents[0]);
+        int opcode = OpCodeTables.io.get(instructionComponents[0]);
         String[] operands = instructionComponents[1].split(",");
         Arrays.setAll(operands, i -> operands[i].trim());
         int r = Integer.parseInt(operands[0]);
@@ -330,7 +277,7 @@ public class Assembler {
 
     // Handler for Miscellaneous (HLT, TRAP)
     private void handleMisc(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
-        int opcode = opcodeForMisallaneous.get(instructionComponents[0]);
+        int opcode = OpCodeTables.miscellaneous.get(instructionComponents[0]);
         switch (instructionComponents[0]) {
             case "HLT":
                 machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, 0));
@@ -380,7 +327,7 @@ public class Assembler {
                 System.out.println(line);
             }
 
-            // 🔹 Second pass
+            // Second pass
             assembler.secondPass(inputLines);
             System.out.println("\nAssembly completed. Check listingFile.txt and LoadFile.txt for output.");
 
