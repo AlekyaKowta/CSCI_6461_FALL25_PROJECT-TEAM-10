@@ -21,6 +21,9 @@ public class Assembler {
     // Symbol Table mapping labels to addresses
     public HashMap<String, Integer> symbolsMap = new HashMap<>();
 
+    // Expose machine code list for access after second pass
+    public ArrayList<String> machineCodeOctal = new ArrayList<>();
+
     // region Helper Methods
 
     /// <summary>
@@ -46,8 +49,6 @@ public class Assembler {
     public void generateListingFile(ArrayList<String> inputFileLines, String destinationFile, ArrayList<String> output) {
 
         ArrayList<String> dataToWrite = new ArrayList<>();
-        int maxLines = Math.max(inputFileLines.size(), output.size());
-
         int outputIndex = 0;
         for (int i = 0; i < inputFileLines.size(); i++) {
             String sourceLine = inputFileLines.get(i);
@@ -214,6 +215,47 @@ public class Assembler {
         return inputRows;
     }
 
+    public ArrayList<String> firstPassWithComments(String inputFile, ArrayList<String> originalLines) throws IOException {
+        BufferedReader reader = new BufferedReader(new FileReader(inputFile));
+        ArrayList<String> cleanLines = new ArrayList<>();
+        String row;
+
+        while ((row = reader.readLine()) != null) {
+            originalLines.add(row);  // preserve comment lines
+            String clean = row;
+            int commentIndex = row.indexOf(';');
+            if (commentIndex != -1) {
+                clean = row.substring(0, commentIndex).trim();
+            } else {
+                clean = row.trim();
+            }
+            if (!clean.isEmpty()) {
+                cleanLines.add(clean);
+            }
+        }
+        reader.close();
+
+        // Symbol table build on clean lines, same logic as original firstPass
+        for (String line : cleanLines) {
+            if (line.startsWith("LOC")) {
+                String locationString = "LOC";
+                currentAddress = Integer.parseInt(line.substring(locationString.length()).trim());
+                continue;
+            }
+
+            int symbolIndex = line.indexOf(':');
+            if (symbolIndex != -1) {
+                String label = line.substring(0, symbolIndex).trim();
+                symbolsMap.put(label, currentAddress);
+            }
+
+            if (!line.isEmpty()) {
+                currentAddress++;
+            }
+        }
+        return cleanLines;
+    }
+
     /// <summary>
     /// Second pass assembles machine codes line by line using appropriate handlers based on opcode.
     /// </summary>
@@ -245,7 +287,7 @@ public class Assembler {
         for (String op : lsOps) handlerMap.put(op, this::handleLSOther);
 
         currentAddress = 0;
-        ArrayList<String> machineCodeOctal = new ArrayList<>();
+        machineCodeOctal.clear();
         int symbolIndex;
         for (String inputInstruction : inputFileLines) {
             if (inputInstruction.startsWith("LOC")) {
@@ -273,7 +315,7 @@ public class Assembler {
         System.out.println("\nBinary Code Lines:");
         System.out.println(machineCodeOctal);
         writeDataToFile(LOAD_FILE, machineCodeOctal);
-        generateListingFile(inputFileLines, LISTING_FILE, machineCodeOctal);
+        //generateListingFile(inputFileLines, LISTING_FILE, machineCodeOctal);
     }
 
     /// <summary>
@@ -374,8 +416,11 @@ public class Assembler {
         try {
             Assembler assembler = new Assembler();
 
+            ArrayList<String> originalLines = new ArrayList<>();
+            ArrayList<String> cleanedLines = assembler.firstPassWithComments("sourceProgram.txt", originalLines);
+
             // First pass
-            ArrayList<String> inputLines = assembler.firstPass("sourceProgram.txt");
+            //ArrayList<String> inputLines = assembler.firstPass("sourceProgram.txt");
 
             // Debug: print symbol table
             System.out.println("Symbol Table:");
@@ -384,13 +429,16 @@ public class Assembler {
             }
 
             // Debug: print cleaned input lines
-            System.out.println("\nCleaned Input Lines:");
-            for (String line : inputLines) {
+            System.out.println("\nOriginal Input Lines:");
+            for (String line : originalLines) {
                 System.out.println(line);
             }
 
             // Second pass
-            assembler.secondPass(inputLines);
+            //assembler.secondPass(inputLines);
+            assembler.secondPass(cleanedLines);
+            //Generate Listing File
+            assembler.generateListingFile(originalLines, assembler.LISTING_FILE, assembler.machineCodeOctal);
             System.out.println("\nAssembly completed. Check listingFile.txt and LoadFile.txt for output.");
 
         } catch (IllegalArgumentException e) {
