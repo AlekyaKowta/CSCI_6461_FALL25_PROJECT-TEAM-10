@@ -55,17 +55,27 @@ public class Assembler {
         writeDataToFile(destinationFile, dataToWrite);
     }
 
+    // Parsing Operands
+    private String[] parseOperands(String operandString) {
+        String[] ops = operandString.split(",");
+        Arrays.setAll(ops, i -> ops[i].trim());
+        return ops;
+    }
+
     // Utility: Parse the instructions
     String lsInstructionParse(String[] instructionComponents) {
-        // Get the opcode from the map
+        // Get the opcode based on instruction mnemonic
         int opcode = OpCodeTables.loadStoreOther.get(instructionComponents[0]);
 
         // Split and trim the operand list
-        String[] operands = instructionComponents[1].split(",");
-        Arrays.setAll(operands, i -> operands[i].trim());
+        String[] operands = parseOperands(instructionComponents[1]);
 
-        int r, x, address, i; // Changed 'a1' to 'x' to be more descriptive
-
+        // reg: General purpose register
+        // idx: Index register
+        // address: Memory address or label resolved to integer
+        // indirect: Indirect addressing bit (optional)
+        int reg, idx, address, indirect;
+        // Instructions with format: opcode r,x,address[,i]
         switch (instructionComponents[0]) {
             case "LDR":
             case "STR":
@@ -79,33 +89,37 @@ public class Assembler {
             case "JGE":
             case "AMR":
             case "SMR":
-                r = Integer.parseInt(operands[0]);
-                x = Integer.parseInt(operands[1]);
+                reg = Integer.parseInt(operands[0]);
+                idx = Integer.parseInt(operands[1]);
                 address = Integer.parseInt(operands[2]);
-                i = (operands.length > 3) ? Integer.parseInt(operands[3]) : 0; // Optional operand
+                indirect = (operands.length > 3) ? Integer.parseInt(operands[3]) : 0; // Optional operand
                 return String.format("%06o\t%06o", currentAddress,
-                        (opcode << 10) | (r << 8) | (x << 6) | (i << 5) | address);
+                        (opcode << 10) | (reg << 8) | (idx << 6) | (indirect << 5) | address);
 
+            // Instructions with format: opcode x,address[,i]
             case "LDX":
             case "STX":
-                x = Integer.parseInt(operands[0]);
+                idx = Integer.parseInt(operands[0]);
                 address = Integer.parseInt(operands[1]);
-                i = (operands.length > 2) ? Integer.parseInt(operands[2]) : 0;
-                return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (x << 6) | (i << 5) | address);
+                indirect = (operands.length > 2) ? Integer.parseInt(operands[2]) : 0;
+                return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (idx << 6) | (indirect << 5) | address);
 
+            // Instructions with format: opcode r[,i]
             case "SETCCE":
-                r = Integer.parseInt(operands[0]);
-                return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (r << 8));
+                reg = Integer.parseInt(operands[0]);
+                return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg << 8));
 
+            // Instructions with format: opcode address
             case "RFS":
                 address = Integer.parseInt(operands[0]);
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | address);
 
+            // Instructions with format: opcode r,address
             case "AIR":
             case "SIR":
-                r = Integer.parseInt(operands[0]);
+                reg = Integer.parseInt(operands[0]);
                 address = Integer.parseInt(operands[1]);
-                return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (r << 8) | address);
+                return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg << 8) | address);
 
             default:
                 return "ERROR: Unknown or invalid instruction!";
@@ -228,10 +242,11 @@ public class Assembler {
     // Handler for Data
     private void handleData(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
         int dataValue;
-        try {
-            dataValue = Integer.parseInt(instructionComponents[1]);
-        } catch (NumberFormatException e) {
-            dataValue = symbolsMap.get(instructionComponents[1]);
+        String operand = instructionComponents[1];
+        if (symbolsMap.containsKey(operand)) {
+            dataValue = symbolsMap.get(operand);
+        } else {
+            dataValue = Integer.parseInt(operand);
         }
         machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, dataValue));
     }
@@ -239,8 +254,7 @@ public class Assembler {
     // Handler for Arithmetic/Logic
     private void handleArithmeticLogic(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
         int opcode = OpCodeTables.arithmeticAndLogic.get(instructionComponents[0]);
-        String[] operands = instructionComponents[1].split(",");
-        Arrays.setAll(operands, i -> operands[i].trim());
+        String[] operands = parseOperands(instructionComponents[1]);
         int reg1, reg2;
         if (instructionComponents[0].equals("AND") || instructionComponents[0].equals("ORR")
                 || instructionComponents[0].equals("MLT") || instructionComponents[0].equals("DVD") || instructionComponents[0].equals("TRR")) {
@@ -256,8 +270,7 @@ public class Assembler {
     // Handler for Shift/Rotate
     private void handleShiftRotate(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
         int opcode = OpCodeTables.shiftRotate.get(instructionComponents[0]);
-        String[] operands = instructionComponents[1].split(",");
-        Arrays.setAll(operands, i -> operands[i].trim());
+        String[] operands = parseOperands(instructionComponents[1]);
         int a = Integer.parseInt(operands[0]);
         int b = Integer.parseInt(operands[1]);
         int c = Integer.parseInt(operands[2]);
@@ -268,7 +281,7 @@ public class Assembler {
     // Handler for IO
     private void handleIO(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
         int opcode = OpCodeTables.io.get(instructionComponents[0]);
-        String[] operands = instructionComponents[1].split(",");
+        String[] operands = parseOperands(instructionComponents[1]);
         Arrays.setAll(operands, i -> operands[i].trim());
         int r = Integer.parseInt(operands[0]);
         int devId = Integer.parseInt(operands[1]);
