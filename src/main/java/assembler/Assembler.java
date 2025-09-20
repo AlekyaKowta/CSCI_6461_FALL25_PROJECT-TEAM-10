@@ -41,21 +41,34 @@ public class Assembler {
     }
 
     /// <summary>
+    /// Checks if it is blank/ skippable
+    /// </summary>
+    private boolean isSkippableLine(String line) {
+        String trimmed = line.trim();
+        // LOC line
+        if (trimmed.startsWith("LOC")) return true;
+        // Blank or comment-only
+        if (trimmed.isEmpty() || trimmed.startsWith(";")) return true;
+        // Standalone label (e.g. "End:" or "Msg:")
+        if (trimmed.matches("^[a-zA-Z_][a-zA-Z0-9_]*:$")) return true;
+        return false;
+    }
+
+    /// <summary>
     /// Generates the assembly listing file which includes source lines alongside their machine code.
     /// </summary>
     /// <param name="inputFileLines">List of source input lines</param>
     /// <param name="destinationFile">Path of output listing file</param>
     /// <param name="output">Generated machine code lines aligned with source</param>
-    public void generateListingFile(ArrayList<String> inputFileLines, String destinationFile, ArrayList<String> output) {
-
+    public void generateListingFile(ArrayList<String> originalLines, String destinationFile, ArrayList<String> machineCodeOctal) {
         ArrayList<String> dataToWrite = new ArrayList<>();
         int outputIndex = 0;
-        for (int i = 0; i < inputFileLines.size(); i++) {
-            String sourceLine = inputFileLines.get(i);
-            if (sourceLine.startsWith("LOC")) {
-                dataToWrite.add(sourceLine); // No machine code for LOC
+        for (String sourceLine : originalLines) {
+            if (isSkippableLine(sourceLine)) {
+                dataToWrite.add(sourceLine); // Just the original source line (LOC, blank, comment, label)
             } else {
-                String resultLine = (outputIndex < output.size()) ? output.get(outputIndex++) : "";
+                // Only increment outputIndex for lines that actually produce code
+                String resultLine = (outputIndex < machineCodeOctal.size()) ? machineCodeOctal.get(outputIndex++) : "";
                 dataToWrite.add(String.format("%s %s", resultLine, sourceLine));
             }
         }
@@ -271,7 +284,6 @@ public class Assembler {
         System.out.println("\nBinary Code Lines:");
         System.out.println(machineCodeOctal);
         writeDataToFile(LOAD_FILE, machineCodeOctal);
-        //generateListingFile(inputFileLines, LISTING_FILE, machineCodeOctal);
     }
 
     /// <summary>
