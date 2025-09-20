@@ -1,10 +1,7 @@
 package src.main.java.assembler;
 
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
+import javax.swing.*;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Arrays;
@@ -382,31 +379,45 @@ public class Assembler {
     /// </summary>
     public static void main(String[] args) {
         try {
-            Assembler assembler = new Assembler();
+            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
 
-            ArrayList<String> originalLines = new ArrayList<>();
+            JFileChooser fileChooser = new JFileChooser(".");
+            fileChooser.setDialogTitle("Select Assembly Source File");
 
-            // First Pass
-            ArrayList<String> cleanedLines = assembler.firstPassWithComments("sourceProgram.txt", originalLines);
+            int userSelection = fileChooser.showOpenDialog(null);
 
-            // Debug: print symbol table
-            System.out.println("Symbol Table:");
-            for (String key : assembler.symbolsMap.keySet()) {
-                System.out.println(key + " -> " + assembler.symbolsMap.get(key));
+            if (userSelection == JFileChooser.APPROVE_OPTION) {
+                File fileToOpen = fileChooser.getSelectedFile();
+                String inputSourceFile = fileToOpen.getAbsolutePath();
+
+                Assembler assembler = new Assembler();
+
+                ArrayList<String> originalLines = new ArrayList<>();
+
+                // First Pass
+                ArrayList<String> cleanedLines = assembler.firstPassWithComments(inputSourceFile, originalLines);
+
+                // Debug: print symbol table
+                System.out.println("Symbol Table:");
+                for (String key : assembler.symbolsMap.keySet()) {
+                    System.out.println(key + " -> " + assembler.symbolsMap.get(key));
+                }
+
+                // Debug: print cleaned input lines
+                System.out.println("\nOriginal Input Lines:");
+                for (String line : originalLines) {
+                    System.out.println(line);
+                }
+
+                // Second pass
+                assembler.secondPass(cleanedLines);
+                //Generate Listing File
+                assembler.generateListingFile(originalLines, assembler.LISTING_FILE, assembler.machineCodeOctal);
+                System.out.println("\nAssembly completed. Check listingFile.txt and LoadFile.txt for output.");
             }
-
-            // Debug: print cleaned input lines
-            System.out.println("\nOriginal Input Lines:");
-            for (String line : originalLines) {
-                System.out.println(line);
+            else{
+                System.out.println("No file selected. Exiting...");
             }
-
-            // Second pass
-            assembler.secondPass(cleanedLines);
-            //Generate Listing File
-            assembler.generateListingFile(originalLines, assembler.LISTING_FILE, assembler.machineCodeOctal);
-            System.out.println("\nAssembly completed. Check listingFile.txt and LoadFile.txt for output.");
-
         } catch (IllegalArgumentException e) {
             System.err.println("ASSEMBLER FATAL ERROR: " + e.getMessage());
             System.exit(1);
