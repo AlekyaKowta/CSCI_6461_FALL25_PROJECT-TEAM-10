@@ -1,25 +1,14 @@
+package src.main.java.ui;
 
-
-
-
-package ui;
-
+import src.main.java.core.MachineController;
+import src.main.java.core.MachineState;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.File;
-
-/**
- * Interface to simulate the essential methods needed by the GUI before the
- * MachineController is fully implemented.
- */
-interface DummyController {
-    void handleIPL(String loadFilePath);
-    void handlePlaceholderAction(ActionEvent e);
-    void handleRegisterLoad(String registerName);
-}
+import java.io.IOException;
 
 public class SimulatorUI extends JFrame {
 
@@ -52,12 +41,15 @@ public class SimulatorUI extends JFrame {
     private JTextArea cacheContentArea, printerArea;
     private JTextField consoleInputField;
 
-    private DummyController controller;
+    private MachineController controller;
 
     // Constructor
-    public SimulatorUI(DummyController controller) {
-        this.controller = controller;
+    public SimulatorUI() {
+        // Initialize MachineState and MachineController, passing 'this' (the UI)
+        MachineState state = new MachineState();
+        this.controller = new MachineController(state, this);
         initializeUI();
+        updateDisplays(); // Initial display update
     }
 
     private void initializeUI() {
@@ -336,38 +328,72 @@ public class SimulatorUI extends JFrame {
         return p;
     }
 
-    // --- Placeholder Action Handlers ---
+    // Public getter for the printer area (used by the Controller)
+    public JTextArea getPrinterArea() {
+        return printerArea;
+    }
+
+    /**
+     * Updates all register and memory displays from the MachineState.
+     */
+    public void updateDisplays() {
+        MachineState state = controller.getMachineState();
+
+        // Update Internal Registers (Octal format: %06o for 6 octal digits)
+        pcField.setText(String.format("%06o", state.getPC()));
+        marField.setText(String.format("%06o", state.getMAR()));
+        mbrField.setText(String.format("%06o", state.getMBR()));
+        irField.setText(String.format("%06o", state.getIR()));
+        ccField.setText(String.format("%04o", state.getCC()));
+        mfrField.setText(String.format("%04o", state.getMFR()));
+
+        // Update GPRs and IXRs
+        for (int i = 0; i < 4; i++) {
+            gprFields[i].setText(String.format("%06o", state.getGPR(i)));
+        }
+        for (int i = 1; i < 4; i++) {
+            ixrFields[i].setText(String.format("%06o", state.getIXR(i)));
+        }
+
+        // Update Binary/Octal input field with contents of MBR (or memory at MAR, as needed)
+        int octalValue = state.getMBR();
+        octalInputField.setText(String.format("%06o", octalValue));
+        binaryInputField.setText(String.format("%16s", Integer.toBinaryString(octalValue)).replace(' ', '0'));
+    }
+
+    // --- IPL Button Action Handlers ---
 
     private void handleIPL(ActionEvent e) {
         JFileChooser fileChooser = new JFileChooser(new File("."));
-        fileChooser.setDialogTitle("Select Program Load File");
+        fileChooser.setDialogTitle("Select Program Load File"); // Dialogue to ask for file location
 
         if (fileChooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
             File loadFile = fileChooser.getSelectedFile();
             programFileField.setText(loadFile.getAbsolutePath());
-            printerArea.append("IPL button pressed. Ready to load program.\n");
+            printerArea.append("Loading program from: " + loadFile.getName() + "...\n");
+
+            try {
+                // Call the controller's implementation of the ROM load simulation
+                controller.performIPL(loadFile.getAbsolutePath());
+                updateDisplays();
+            } catch (IOException ex) {
+                // If the program encounters an error, display an error message on the console printer and stop.
+                printerArea.append("IPL ERROR: " + ex.getMessage() + "\n");
+            } catch (NumberFormatException ex) {
+                // Handle parsing errors if the file is malformed
+                printerArea.append("IPL ERROR: Invalid octal data found in load file.\n");
+            }
         }
     }
 
+    // --- Placeholder Action Handlers (Now calling the Controller) ---
+
     private void handlePlaceholderAction(ActionEvent e) {
-        printerArea.append("Button '" + e.getActionCommand() + "' pressed. Logic placeholder.\n");
+        controller.handlePlaceholderAction(e);
     }
 
     // --- Main Method to run the UI ---
     public static void main(String[] args) {
-        // Dummy implementation of the controller interface for compilation/display
-        DummyController dummyController = new DummyController() {
-            @Override
-            public void handleIPL(String loadFilePath) {}
-            @Override
-            public void handlePlaceholderAction(ActionEvent e) {}
-            @Override
-            public void handleRegisterLoad(String registerName) {
-                System.out.println("Load button pressed for register: " + registerName);
-            }
-        };
-
-        SwingUtilities.invokeLater(() -> new SimulatorUI(dummyController));
+        SwingUtilities.invokeLater(() -> new SimulatorUI());
     }
 }
-
