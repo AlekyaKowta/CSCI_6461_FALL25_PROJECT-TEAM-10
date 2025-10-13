@@ -10,13 +10,26 @@ public class MachineState {
     private int[] IXR = new int[4]; // Index Registers X0-X3 (X0 usually unused, or used as a GPR)
 
     public MachineState() {
-        //Upon powering up, all elements of memory should be set to zero
+        initialize();
+    }
+
+    /**
+     * Clears all Memory and resets all Registers to 0.
+     */
+    public void initialize(){
+        // Clear all memory (required upon powering up)
         for (int i = 0; i < MEMORY_SIZE; i++) {
             memory[i] = 0;
         }
-        // Initialize registers to 0
+        // Reset all registers
         PC = MAR = MBR = IR = CC = MFR = 0;
+        for (int i = 0; i < 4; i++) {
+            GPR[i] = 0;
+            // IXR[0] is not used, but initialize all for array safety
+            IXR[i] = 0;
+        }
     }
+
 
     // --- Memory Access ---
 
