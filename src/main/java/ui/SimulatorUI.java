@@ -333,6 +333,16 @@ public class SimulatorUI extends JFrame {
         return printerArea;
     }
 
+    // Public getter for the Octal Input field (needed by MachineController for manual loads)
+    public JTextField getOctalInputField() {
+        return octalInputField;
+    }
+
+    // Public getter for the Binary Input field (if needed, though MBR sets the value)
+    public JTextField getBinaryInputField() {
+        return binaryInputField;
+    }
+
     /**
      * Updates all register and memory displays from the MachineState.
      */

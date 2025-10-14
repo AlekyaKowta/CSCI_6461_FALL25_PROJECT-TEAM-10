@@ -1,7 +1,7 @@
 package src.main.java.core;
 
 public class MachineState {
-    private final int MEMORY_SIZE = 2048;
+    public final int MEMORY_SIZE = 2048;
     private int[] memory = new int[MEMORY_SIZE];
     
     // Registers (16-bit, stored as int, masked on update)

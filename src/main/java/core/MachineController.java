@@ -316,4 +316,52 @@ public class MachineController {
             ui.getPrinterArea().append("Error: Invalid octal value in input field.\n");
         }
     }
+
+    /**
+     * Handler for the main control panel buttons (Load, Store, Load+, Store+).
+     * This fulfills the memory inspection/deposit capabilities.
+     */
+    public void handlePlaceholderAction(ActionEvent e) {
+        String command = e.getActionCommand();
+        try {
+            int currentMAR = state.getMAR();
+            int currentMBR = state.getMBR();
+
+            switch (command) {
+                case "Load": // Load M[MAR] -> MBR
+                    state.setMBR(state.getMemory(currentMAR));
+                    ui.getPrinterArea().append(String.format("Console Load: M[%06o] -> MBR = %06o\n", currentMAR, state.getMBR()));
+                    break;
+                case "Load+": // Load M[MAR] -> MBR; MAR++
+                    state.setMBR(state.getMemory(currentMAR));
+                    state.setMAR(currentMAR + 1);
+                    ui.getPrinterArea().append(String.format("Console Load+: M[%06o] -> MBR; MAR++ to %06o\n", currentMAR, state.getMAR()));
+                    break;
+                case "Store": // Store MBR -> M[MAR]
+                    state.setMemory(currentMAR, currentMBR);
+                    ui.getPrinterArea().append(String.format("Console Store: M[%06o] <- MBR = %06o\n", currentMAR, currentMBR));
+                    break;
+                case "Store+": // Store MBR -> M[MAR]; MAR++
+                    state.setMemory(currentMAR, currentMBR);
+                    state.setMAR(currentMAR + 1);
+                    ui.getPrinterArea().append(String.format("Console Store+: M[%06o] <- MBR; MAR++ to %06o\n", currentMAR, state.getMAR()));
+                    break;
+                case "Run":
+                    runProgram();
+                    break;
+                case "Step":
+                    singleStep();
+                    break;
+                case "Halt":
+                    handleHLT();
+                    break;
+                default:
+                    ui.getPrinterArea().append("Button '" + command + "' pressed. Logic not implemented.\n");
+            }
+        } catch (Exception ex) {
+            ui.getPrinterArea().append("CONSOLE ERROR: " + ex.getMessage() + "\n");
+        }
+        ui.updateDisplays();
+    }
+    // endregion
 }
