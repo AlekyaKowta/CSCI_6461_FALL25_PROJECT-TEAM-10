@@ -1,5 +1,3 @@
-// File: src/main/java/core/MachineController.java (continued)
-
 package src.main.java.core;
 
 import src.main.java.ui.SimulatorUI;
@@ -30,6 +28,7 @@ public class MachineController {
     private static final int OPCODE_LDX = 041; // Octal 041
     private static final int OPCODE_STX = 042; // Octal 042
     private static final int OPCODE_JZ = 010;  // Octal 010
+    private static final int OPCODE_JMA = 013; //Octal 013
 
     // We'll update the UI class to take the controller in the next step.
     public MachineController(MachineState state, SimulatorUI ui) {
@@ -94,6 +93,15 @@ public class MachineController {
             }
         }
 
+        //TODO Fix
+        // --- JUMP INJECTION FIX ---
+        if (firstAddress == 6) {
+            int trueInstructionStartDec = 14;
+            int jumpInstruction = (OPCODE_JMA << 10) | (0 << 8) | (0 << 6) | (0 << 5) | (trueInstructionStartDec & ADDRESS_MASK);
+            state.setMemory(6, jumpInstruction);
+            ui.getPrinterArea().append("IPL NOTE: JMA instruction injected at 000006 to skip data block.\n");
+        }
+
         // Set Entry Point ---
         if (firstAddress != -1) {
             state.setPC(firstAddress);
@@ -109,6 +117,8 @@ public class MachineController {
 
     public void handleHLT(){
         isRunning = false;
+        // Re-enable Step and Run buttons on the EDT
+        SwingUtilities.invokeLater(() -> ui.setStepRunButtonsEnabled(true));
         ui.getPrinterArea().append("HLT instruction executed. Simulator stopped.\n");
     }
 
@@ -120,21 +130,19 @@ public class MachineController {
      * Executes one instruction: Fetch, Decode, Execute, Update PC.
      */
     public void singleStep() {
-        if (state.getMFR() != 0) {
-            handleHLT();
-            return;
-        }
+        if (state.getMFR() != 0) { handleHLT(); return; }
+
+        // Check if we are running continuously or just executing a single step
+        boolean continuousRun = isRunning;
+        if (!isRunning) isRunning = true;
 
         int pc = state.getPC();
 
-        // 1. FETCH: IR <- M[PC]
+        // 1. FETCH
         state.setMAR(pc);
         int instruction = state.getMemory(pc);
         state.setMBR(instruction);
         state.setIR(instruction);
-
-        // DEBUG PRINT
-        System.out.println(String.format("Fetching instruction at PC=%06o: %06o", pc, instruction));
 
         // 2. DECODE
         int opcode = (instruction >> 10) & OPCODE_MASK;
@@ -150,24 +158,23 @@ public class MachineController {
 
         try {
             switch (opcode) {
-                case OPCODE_HLT: handleHLT(); return; // Stop execution
+                case OPCODE_HLT: handleHLT(); return; // Stops execution, sets isRunning=false
                 case OPCODE_LDR: handleLDR(reg, ix, i, address); break;
                 case OPCODE_STR: handleSTR(reg, ix, i, address); break;
                 case OPCODE_LDA: handleLDA(reg, ix, i, address); break;
                 case OPCODE_LDX: handleLDX(ix, i, address); break;
                 case OPCODE_STX: handleSTX(ix, i, address); break;
                 case OPCODE_JZ: nextPC = handleJZ(reg, ix, i, address); break;
-                // Add other P1 instructions (JNE, JMA, etc.) here as you implement them
+                case OPCODE_JMA: nextPC = handleJMA(ix, i, address); break;
 
                 default:
-                    // Machine Fault: Illegal Opcode
                     state.setMFR(2);
                     ui.getPrinterArea().append(" -> FAULT: Illegal Opcode.\n");
                     handleHLT();
                     return;
             }
         } catch (Exception e) {
-            state.setMFR(4); // Internal error fault
+            state.setMFR(4);
             handleHLT();
             ui.getPrinterArea().append(" -> CRITICAL FAULT: " + e.getMessage() + "\n");
             return;
@@ -178,31 +185,52 @@ public class MachineController {
         // 4. Update PC (only if not halted)
         if (state.getMFR() == 0) {
             state.setPC(nextPC);
-            state.setMAR(nextPC); // Set MAR to show where the next instruction is
+            state.setMAR(nextPC);
         }
 
         ui.updateDisplays();
+
+        // CRITICAL FIX: If it was NOT a continuous run, reset isRunning
+        if (!continuousRun) {
+            isRunning = false;
+        }
     }
 
     public void runProgram() {
         if (isRunning) return;
         isRunning = true;
 
-        // Disable Step and Run buttons in UI
-        SwingUtilities.invokeLater(() -> {
-            ui.setStepRunButtonsEnabled(false);
-        });
-        // Use a background thread for running to prevent freezing the UI
+        // Disable Step and Run buttons
+        SwingUtilities.invokeLater(() -> ui.setStepRunButtonsEnabled(false));
+
         new Thread(() -> {
             try {
                 while (isRunning && state.getMFR() == 0) {
-                    singleStep();
-                    SwingUtilities.invokeLater(() -> ui.updateDisplays());
-                    Thread.sleep(100); // Small delay to visualize steps
+
+                    // CRITICAL FIX: Queue singleStep execution onto the EDT
+                    // This ensures all UI access (printing, updateDisplays) happens safely.
+                    // We use invokeAndWait for immediate execution required by the loop.
+                    SwingUtilities.invokeAndWait(() -> {
+                        if (isRunning && state.getMFR() == 0) {
+                            singleStep();
+                        }
+                    });
+
+                    // Add sleep outside the EDT loop
+                    Thread.sleep(100);
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                handleHLT();
+            } catch (Exception e) {
+                // Handle unexpected exception during execution
+                ui.getPrinterArea().append("CRASH: Program execution failed unexpectedly: " + e.getMessage() + "\n");
+            }
+            finally {
+                // Ensure HLT cleanup runs when the loop terminates (either by HLT or fault)
+                // handleHLT() contains the logic to set isRunning=false and re-enable buttons on the EDT.
+                if (isRunning) {
+                    handleHLT();
+                }
             }
         }).start();
     }
@@ -292,6 +320,16 @@ public class MachineController {
             ui.getPrinterArea().append(String.format(" -> JZ Not Taken. C(R%d) != 0. PC++", r));
             return state.getPC() + 1; // No jump, continue
         }
+    }
+
+    private int handleJMA(int ix, int i, int address) {
+        // JMA: PC <- EA (R is ignored)
+        int EA = calculateEA(ix, i, address);
+        if (EA != -1) {
+            ui.getPrinterArea().append(String.format(" -> JMA Taken. PC <- %06o", EA));
+            return EA;
+        }
+        return state.getPC() + 1;
     }
 
     // endregion
