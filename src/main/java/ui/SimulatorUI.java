@@ -396,6 +396,11 @@ public class SimulatorUI extends JFrame {
         }
     }
 
+    public void setStepRunButtonsEnabled(boolean enabled) {
+        singleStepButton.setEnabled(enabled);
+        runButton.setEnabled(enabled);
+    }
+
     // --- Placeholder Action Handlers (Now calling the Controller) ---
 
     private void handlePlaceholderAction(ActionEvent e) {

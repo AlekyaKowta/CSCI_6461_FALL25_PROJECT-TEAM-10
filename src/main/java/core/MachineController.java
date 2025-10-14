@@ -4,6 +4,7 @@ package src.main.java.core;
 
 import src.main.java.ui.SimulatorUI;
 
+import javax.swing.*;
 import java.awt.event.ActionEvent;
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -132,6 +133,9 @@ public class MachineController {
         state.setMBR(instruction);
         state.setIR(instruction);
 
+        // DEBUG PRINT
+        System.out.println(String.format("Fetching instruction at PC=%06o: %06o", pc, instruction));
+
         // 2. DECODE
         int opcode = (instruction >> 10) & OPCODE_MASK;
         int reg = (instruction >> 8) & R_MASK;
@@ -172,7 +176,7 @@ public class MachineController {
         ui.getPrinterArea().append("\n");
 
         // 4. Update PC (only if not halted)
-        if (state.getMFR() == 0 && !isRunning) {
+        if (state.getMFR() == 0) {
             state.setPC(nextPC);
             state.setMAR(nextPC); // Set MAR to show where the next instruction is
         }
@@ -184,11 +188,16 @@ public class MachineController {
         if (isRunning) return;
         isRunning = true;
 
+        // Disable Step and Run buttons in UI
+        SwingUtilities.invokeLater(() -> {
+            ui.setStepRunButtonsEnabled(false);
+        });
         // Use a background thread for running to prevent freezing the UI
         new Thread(() -> {
             try {
                 while (isRunning && state.getMFR() == 0) {
                     singleStep();
+                    SwingUtilities.invokeLater(() -> ui.updateDisplays());
                     Thread.sleep(100); // Small delay to visualize steps
                 }
             } catch (InterruptedException e) {
@@ -288,7 +297,6 @@ public class MachineController {
     // endregion
 
     // region Manual Console Input Handlers
-
     /**
      * Handles the small square load button next to GPR/IXR/PC/MAR/MBR.
      * Loads the Octal Input field value into the specified register.
@@ -363,5 +371,6 @@ public class MachineController {
         }
         ui.updateDisplays();
     }
+
     // endregion
 }
