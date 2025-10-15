@@ -4,6 +4,8 @@ import src.main.java.core.MachineController;
 import src.main.java.core.MachineState;
 
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -49,6 +51,7 @@ public class SimulatorUI extends JFrame {
         MachineState state = new MachineState();
         this.controller = new MachineController(state, this);
         initializeUI();
+        addInputListeners();
         updateDisplays(); // Initial display update
     }
 
@@ -108,6 +111,56 @@ public class SimulatorUI extends JFrame {
         pack();
         setLocationRelativeTo(null);
         setVisible(true);
+    }
+
+    // Input Listener Method
+    private void addInputListeners(){
+        octalInputField.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                octalToBinaryConverter();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                octalToBinaryConverter();
+            }
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                // Not used for plain text fields
+            }
+        });
+    }
+
+    /**
+     * Converts the text in the octal input field to a 16-bit binary string
+     * and displays it in the binary input field.
+     */
+    private void octalToBinaryConverter() {
+        String octalStr = octalInputField.getText().trim();
+        if (octalStr.isEmpty()) {
+            binaryInputField.setText("0000000000000000");
+            return;
+        }
+
+        try {
+            // 1. Convert octal string to integer (using base 8)
+            int decimalValue = Integer.parseInt(octalStr, 8);
+
+            // 2. Ensure the value fits within 16 bits (0 to 65535)
+            // Mask the value and convert to binary string
+            String binaryStr = Integer.toBinaryString(decimalValue & 0xFFFF);
+
+            // 3. Pad with leading zeros to ensure a fixed 16-bit length
+            String paddedBinary = String.format("%16s", binaryStr).replace(' ', '0');
+
+            // 4. Update the Binary field
+            binaryInputField.setText(paddedBinary);
+
+        } catch (NumberFormatException e) {
+            // Handle case where input contains non-octal characters or is too large
+            binaryInputField.setText("Invalid OCTAL Input!");
+        }
     }
 
     // --- Helper Methods for Styling and Components ---
