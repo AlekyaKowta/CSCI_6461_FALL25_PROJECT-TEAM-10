@@ -11,6 +11,9 @@ public class Assembler {
     // Tracks current address during assembly
     public int currentAddress = 0;
 
+    // NEW: Tracks the address of the first actual instruction (not LOC, not Data)
+    public int firstInstructionAddress = -1;
+
     // Output file names
     public String LISTING_FILE = "ListingFile.txt";
     public String LOAD_FILE = "LoadFile.txt";
@@ -59,13 +62,26 @@ public class Assembler {
     /// <param name="output">Generated machine code lines aligned with source</param>
     public void generateListingFile(ArrayList<String> originalLines, String destinationFile, ArrayList<String> machineCodeOctal) {
         ArrayList<String> dataToWrite = new ArrayList<>();
-        int outputIndex = 0;
+
+        // Rationale: We assume the entry at index 0 is the M[5] Entry Point (System Metadata)
+        // and that the first line of executable code starts at index 1.
+        int outputIndex = 1; // START AT INDEX 1 TO SKIP M[5] ENTRY
+
         for (String sourceLine : originalLines) {
             if (isSkippableLine(sourceLine)) {
-                dataToWrite.add(sourceLine); // Just the original source line (LOC, blank, comment, label)
+                // Skips LOC, blank lines, and standalone labels—these have no machine code.
+                dataToWrite.add(sourceLine);
             } else {
-                // Only increment outputIndex for lines that actually produce code
-                String resultLine = (outputIndex < machineCodeOctal.size()) ? machineCodeOctal.get(outputIndex++) : "";
+                String resultLine = "";
+
+                // Check if there is a machine code entry left to align with the source line.
+                if (outputIndex < machineCodeOctal.size()) {
+                    // Fetch the aligned machine code (starting from the second element, index 1)
+                    resultLine = machineCodeOctal.get(outputIndex);
+                    outputIndex++; // Advance the machine code pointer to the next generated line
+                }
+
+                // Format: [ADDRESS  VALUE] [Source Line]
                 dataToWrite.add(String.format("%s %s", resultLine, sourceLine));
             }
         }
@@ -201,6 +217,9 @@ public class Assembler {
         }
         reader.close();
 
+        currentAddress = 0; // Reset for Pass 1 Symbol Table build
+        boolean isFirstExecutableInstruction = true; // Flag to track first instruction
+
         // Symbol table build on clean lines
         for (String line : cleanLines) {
             if (line.startsWith("LOC")) {
@@ -216,10 +235,35 @@ public class Assembler {
             }
 
             if (!line.isEmpty()) {
+                // If this is the first non-LOC, non-label, non-blank line, record its address.
+                if (isFirstExecutableInstruction && !line.startsWith("Data")) {
+                    this.firstInstructionAddress = currentAddress;
+                    isFirstExecutableInstruction = false;
+                }
                 currentAddress++;
             }
         }
         return cleanLines;
+    }
+
+    /// <summary>
+    /// Injects the address of the first executable instruction into M[5].
+    /// </summary>
+    private void injectEntrypoint() {
+        if (firstInstructionAddress != -1) {
+            // Reserved Memory Address 5 is used as the Execution Start Address Register (ESAR) location.
+            int reservedAddress5 = 5;
+
+            // 1. Format the true starting address (e.g., 000016) into 6-digit octal.
+            String entryPointValueOctal = String.format("%06o", firstInstructionAddress);
+
+            // 2. Create the system metadata line: "000005 [TAB] 000016"
+            String entryPointLine = String.format("%06o\t%s", reservedAddress5, entryPointValueOctal);
+
+            // 3. CRITICAL: Inject this line at index 0 of the machineCodeOctal list.
+            // This ensures M[5] is the very first entry in the Load File.
+            machineCodeOctal.add(0, entryPointLine);
+        }
     }
 
     /// <summary>
@@ -278,6 +322,10 @@ public class Assembler {
             }
             currentAddress++;
         }
+
+        // CRITICAL ADD: Inject the M[5] entry point BEFORE writing the file.
+        injectEntrypoint();
+
         System.out.println("\nBinary Code Lines:");
         System.out.println(machineCodeOctal);
         writeDataToFile(LOAD_FILE, machineCodeOctal);

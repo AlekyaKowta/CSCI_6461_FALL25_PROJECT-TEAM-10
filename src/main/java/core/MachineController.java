@@ -93,23 +93,26 @@ public class MachineController {
             }
         }
 
-        //TODO Fix
-        // --- JUMP INJECTION FIX ---
-        if (firstAddress == 6) {
-            int trueInstructionStartDec = 14;
-            int jumpInstruction = (OPCODE_JMA << 10) | (0 << 8) | (0 << 6) | (0 << 5) | (trueInstructionStartDec & ADDRESS_MASK);
-            state.setMemory(6, jumpInstruction);
-            ui.getPrinterArea().append("IPL NOTE: JMA instruction injected at 000006 to skip data block.\n");
-        }
-
         // Set Entry Point ---
-        if (firstAddress != -1) {
-            state.setPC(firstAddress);
-            state.setMAR(firstAddress); // Set MAR to show the start of the loaded program
+        // 1. Check Reserved Location 5 (ESAR) for the TRUE execution start address.
+        // M[5] will hold the address of the first instruction (e.g., 000016) if the assembler set it.
+        int executionStartPC = state.getMemory(5);
+
+        if (executionStartPC != 0) {
+            // Option A: Assembler set M[5]. This is the desired execution start.
+            state.setPC(executionStartPC);
+            state.setMAR(executionStartPC);
             ui.getPrinterArea().append("IPL successful. Loaded " + linesRead + " instructions.\n");
-            ui.getPrinterArea().append("PC set to starting address: " + String.format("%06o", firstAddress) + "\n");
+            ui.getPrinterArea().append(String.format("PC set from M[5] to execution start address: %06o\n", executionStartPC));
+        } else if (firstAddress != -1) {
+            // Option B: Fallback. M[5] is 0. Use the very first address loaded (e.g., 000006).
+            // This is primarily for visualization/debugging, acknowledging that execution may fail (hit HLT).
+            state.setPC(firstAddress);
+            state.setMAR(firstAddress);
+            ui.getPrinterArea().append("IPL warning: M[5] not set. PC set to first loaded location: " + String.format("%06o", firstAddress) + ". Execution may start at data.\n");
         } else {
-            ui.getPrinterArea().append("IPL warning: Load file was empty.\n");
+            // No program loaded
+            ui.getPrinterArea().append("IPL warning: Load file was empty. PC remains 0.\n");
         }
         // Now ready for user to hit run or single step
         ui.updateDisplays();
