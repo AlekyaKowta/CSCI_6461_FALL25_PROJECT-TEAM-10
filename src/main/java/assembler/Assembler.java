@@ -63,9 +63,12 @@ public class Assembler {
     public void generateListingFile(ArrayList<String> originalLines, String destinationFile, ArrayList<String> machineCodeOctal) {
         ArrayList<String> dataToWrite = new ArrayList<>();
 
-        // Rationale: We assume the entry at index 0 is the M[5] Entry Point (System Metadata)
-        // and that the first line of executable code starts at index 1.
-        int outputIndex = 1; // START AT INDEX 1 TO SKIP M[5] ENTRY
+//        // Rationale: We assume the entry at index 0 is the M[5] Entry Point (System Metadata)
+//        // and that the first line of executable code starts at index 1.
+//        int outputIndex = 1; // START AT INDEX 1 TO SKIP M[5] ENTRY
+
+        // Process from start
+        int outputIndex = 0;
 
         for (String sourceLine : originalLines) {
             if (isSkippableLine(sourceLine)) {
@@ -218,7 +221,8 @@ public class Assembler {
         reader.close();
 
         currentAddress = 0; // Reset for Pass 1 Symbol Table build
-        boolean isFirstExecutableInstruction = true; // Flag to track first instruction
+        // Delete reserved code
+        // boolean isFirstExecutableInstruction = true; // Flag to track first instruction
 
         // Symbol table build on clean lines
         for (String line : cleanLines) {
@@ -235,11 +239,12 @@ public class Assembler {
             }
 
             if (!line.isEmpty()) {
-                // If this is the first non-LOC, non-label, non-blank line, record its address.
-                if (isFirstExecutableInstruction && !line.startsWith("Data")) {
-                    this.firstInstructionAddress = currentAddress;
-                    isFirstExecutableInstruction = false;
-                }
+                // Delete reserved space code
+//                // If this is the first non-LOC, non-label, non-blank line, record its address.
+//                if (isFirstExecutableInstruction && !line.startsWith("Data")) {
+//                    this.firstInstructionAddress = currentAddress;
+//                    isFirstExecutableInstruction = false;
+//                }
                 currentAddress++;
             }
         }
@@ -248,23 +253,24 @@ public class Assembler {
 
     /// <summary>
     /// Injects the address of the first executable instruction into M[5].
+    /// DELETE RESERVE CODE
     /// </summary>
-    private void injectEntrypoint() {
-        if (firstInstructionAddress != -1) {
-            // Reserved Memory Address 5 is used as the Execution Start Address Register (ESAR) location.
-            int reservedAddress5 = 5;
-
-            // 1. Format the true starting address (e.g., 000016) into 6-digit octal.
-            String entryPointValueOctal = String.format("%06o", firstInstructionAddress);
-
-            // 2. Create the system metadata line: "000005 [TAB] 000016"
-            String entryPointLine = String.format("%06o\t%s", reservedAddress5, entryPointValueOctal);
-
-            // 3. CRITICAL: Inject this line at index 0 of the machineCodeOctal list.
-            // This ensures M[5] is the very first entry in the Load File.
-            machineCodeOctal.add(0, entryPointLine);
-        }
-    }
+//    private void injectEntrypoint() {
+//        if (firstInstructionAddress != -1) {
+//            // Reserved Memory Address 5 is used as the Execution Start Address Register (ESAR) location.
+//            int reservedAddress5 = 5;
+//
+//            // 1. Format the true starting address (e.g., 000016) into 6-digit octal.
+//            String entryPointValueOctal = String.format("%06o", firstInstructionAddress);
+//
+//            // 2. Create the system metadata line: "000005 [TAB] 000016"
+//            String entryPointLine = String.format("%06o\t%s", reservedAddress5, entryPointValueOctal);
+//
+//            // 3. CRITICAL: Inject this line at index 0 of the machineCodeOctal list.
+//            // This ensures M[5] is the very first entry in the Load File.
+//            machineCodeOctal.add(0, entryPointLine);
+//        }
+//    }
 
     /// <summary>
     /// Second pass assembles machine codes line by line using appropriate handlers based on opcode.
@@ -323,8 +329,9 @@ public class Assembler {
             currentAddress++;
         }
 
+        // Delete Reserved Space code
         // CRITICAL ADD: Inject the M[5] entry point BEFORE writing the file.
-        injectEntrypoint();
+        //injectEntrypoint();
 
         System.out.println("\nBinary Code Lines:");
         System.out.println(machineCodeOctal);

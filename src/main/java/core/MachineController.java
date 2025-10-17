@@ -101,24 +101,38 @@ public class MachineController {
             }
         }
 
+        // Delete Reserved Memory Code
         // Set Entry Point ---
         // 1. Check Reserved Location 5 (ESAR) for the TRUE execution start address.
         // M[5] will hold the address of the first instruction (e.g., 000016) if the assembler set it.
-        int executionStartPC = state.getMemory(5);
+//        int executionStartPC = state.getMemory(5);
+//
+//        if (executionStartPC != 0) {
+//            // Option A: Assembler set M[5]. This is the desired execution start.
+//            executionStartPC &= MASK_12_BIT;
+//            state.setPC(executionStartPC);
+//            state.setMAR(executionStartPC);
+//            ui.getPrinterArea().append("IPL successful. Loaded " + linesRead + " instructions.\n");
+//        } else if (firstAddress != -1) {
+//            // Option B: Fallback. M[5] is 0. Use the very first address loaded (e.g., 0006).
+//            // This is primarily for visualization/debugging, acknowledging that execution may fail (hit HLT).
+//            firstAddress &= MASK_12_BIT;
+//            state.setPC(firstAddress);
+//            state.setMAR(firstAddress);
+//            ui.getPrinterArea().append("IPL warning: M[5] not set. PC set to first loaded location: " + String.format("%04o", firstAddress) + ". Execution may start at data.\n");
+//        } else {
+//            // No program loaded
+//            ui.getPrinterArea().append("IPL warning: Load file was empty. PC remains 0.\n");
+//        }
 
-        if (executionStartPC != 0) {
-            // Option A: Assembler set M[5]. This is the desired execution start.
-            executionStartPC &= MASK_12_BIT;
-            state.setPC(executionStartPC);
-            state.setMAR(executionStartPC);
-            ui.getPrinterArea().append("IPL successful. Loaded " + linesRead + " instructions.\n");
-        } else if (firstAddress != -1) {
-            // Option B: Fallback. M[5] is 0. Use the very first address loaded (e.g., 0006).
-            // This is primarily for visualization/debugging, acknowledging that execution may fail (hit HLT).
+        // Set Entry Point (Option: Always use the first loaded address) ---
+        if (firstAddress != -1) {
+            // PC is set to the first address loaded and masked to 12 bits.
             firstAddress &= MASK_12_BIT;
             state.setPC(firstAddress);
             state.setMAR(firstAddress);
-            ui.getPrinterArea().append("IPL warning: M[5] not set. PC set to first loaded location: " + String.format("%04o", firstAddress) + ". Execution may start at data.\n");
+            ui.getPrinterArea().append("IPL successful. Loaded " + linesRead + " instructions.\n");
+            ui.getPrinterArea().append("PC set to first loaded location: " + String.format("%04o", firstAddress) + ".\n");
         } else {
             // No program loaded
             ui.getPrinterArea().append("IPL warning: Load file was empty. PC remains 0.\n");
@@ -281,7 +295,7 @@ public class MachineController {
         if (EA != -1) {
             int value = state.getMemory(EA);
             state.setGPR(r, value);
-            ui.getPrinterArea().append(String.format(" -> LDR R%d <- M[%06o] = %06o", r, EA, value));
+            ui.getPrinterArea().append(String.format(" -> LDR R%d <- M[%04o] = %06o", r, EA, value));
         }
     }
 
@@ -290,7 +304,7 @@ public class MachineController {
         if (EA != -1) {
             int value = state.getGPR(r);
             state.setMemory(EA, value);
-            ui.getPrinterArea().append(String.format(" -> STR M[%06o] <- R%d = %06o", EA, r, value));
+            ui.getPrinterArea().append(String.format(" -> STR M[%04o] <- R%d = %06o", EA, r, value));
         }
     }
 
@@ -299,7 +313,7 @@ public class MachineController {
         int EA = calculateEA(ix, i, address);
         if (EA != -1) {
             state.setGPR(r, EA);
-            ui.getPrinterArea().append(String.format(" -> LDA R%d <- EA = %06o", r, EA));
+            ui.getPrinterArea().append(String.format(" -> LDA R%d <- EA = %04o", r, EA));
         }
     }
 
@@ -308,7 +322,7 @@ public class MachineController {
         if (EA != -1) {
             int value = state.getMemory(EA);
             state.setIXR(ix, value);
-            ui.getPrinterArea().append(String.format(" -> LDX X%d <- M[%06o] = %06o", ix, EA, value));
+            ui.getPrinterArea().append(String.format(" -> LDX X%d <- M[%04o] = %06o", ix, EA, value));
         }
     }
 
@@ -317,7 +331,7 @@ public class MachineController {
         if (EA != -1) {
             int value = state.getIXR(ix);
             state.setMemory(EA, value);
-            ui.getPrinterArea().append(String.format(" -> STX M[%06o] <- X%d = %06o", EA, ix, value));
+            ui.getPrinterArea().append(String.format(" -> STX M[%04o] <- X%d = %06o", EA, ix, value));
         }
     }
 
@@ -326,7 +340,7 @@ public class MachineController {
         int EA = calculateEA(ix, i, address);
 
         if (state.getGPR(r) == 0) {
-            ui.getPrinterArea().append(String.format(" -> JZ Taken. C(R%d)=0. PC <- %06o", r, EA));
+            ui.getPrinterArea().append(String.format(" -> JZ Taken. C(R%d)=0. PC <- %04o", r, EA));
             return EA; // Next PC is the EA
         } else {
             ui.getPrinterArea().append(String.format(" -> JZ Not Taken. C(R%d) != 0. PC++", r));
