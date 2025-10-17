@@ -19,8 +19,15 @@ public class SimulatorUI extends JFrame {
     private static final Color DARK_CONTROL_BLUE = new Color(50, 100, 150); // Darker blue for buttons
     private static final Color BUTTON_TEXT_COLOR = Color.BLACK; // Changed to BLACK as requested
     private static final int SQUARE_BUTTON_SIZE = 24;
-    private static final String REG_INIT_VALUE = "000000"; // 6 octal digits for 16 bits (GPR, IXR, PC, MAR, MBR, IR)
-    private static final String STATUS_INIT_VALUE = "0000"; // 4 octal digits for CC, MFR
+
+    // R/IXR/MBR/IR are 16-bit (6 octal digits)
+    private static final String REG_INIT_VALUE = "000000";
+
+    // PC/MAR are 12-bit (4 octal digits)
+    private static final String REG_12BIT_INIT_VALUE = "0000";
+
+    // CC/MFR are 4-bit (4 octal digits, padded as needed for display)
+    private static final String STATUS_INIT_VALUE = "0000";
 
     // --- Register Fields ---
     private JTextField[] gprFields = new JTextField[4];
@@ -74,11 +81,11 @@ public class SimulatorUI extends JFrame {
         // ROW 0: Register Columns
 
         // A. GPR Column
-        JPanel gprPanel = createRegisterColumn("GPR", gprFields, 0, 4, true, REG_INIT_VALUE);
+        JPanel gprPanel = createRegisterColumn("GPR", gprFields, 0, 4, true, REG_INIT_VALUE, 6);
         gbc.gridx = 0; gbc.gridy = 0; gbc.weightx = 0.3; centerPanel.add(gprPanel, gbc);
 
         // B. IXR Column
-        JPanel ixrPanel = createRegisterColumn("IXR", ixrFields, 1, 4, true, REG_INIT_VALUE);
+        JPanel ixrPanel = createRegisterColumn("IXR", ixrFields, 1, 4, true, REG_INIT_VALUE, 6);
         gbc.gridx = 1; gbc.gridy = 0; gbc.weightx = 0.3; centerPanel.add(ixrPanel, gbc);
 
         // C. Internal Register Column (PC, MAR, MBR, IR, CC, MFR)
@@ -138,7 +145,7 @@ public class SimulatorUI extends JFrame {
      */
     private void octalToBinaryConverter() {
         String octalStr = octalInputField.getText().trim();
-        if (octalStr.isEmpty()) {
+        if (octalStr.isEmpty() || octalStr.length() > 6) {
             binaryInputField.setText("0000000000000000");
             return;
         }
@@ -191,7 +198,7 @@ public class SimulatorUI extends JFrame {
     /**
      * Creates a single column panel for GPR or IXR with register load buttons.
      */
-    private JPanel createRegisterColumn(String title, JTextField[] fields, int start, int end, boolean includeLoadButtons, String initValue) {
+    private JPanel createRegisterColumn(String title, JTextField[] fields, int start, int end, boolean includeLoadButtons, String initValue, int fieldSize) {
         JPanel p = new JPanel(new GridBagLayout());
         p.setBackground(LIGHT_BLUE);
         p.setBorder(BorderFactory.createTitledBorder(title));
@@ -204,7 +211,7 @@ public class SimulatorUI extends JFrame {
         for (int i = start; i < end; i++) {
             String regName = title + " " + i;
             JLabel label = new JLabel(regName);
-            fields[i] = new JTextField(initValue, 6); // Set 6 octal digits
+            fields[i] = new JTextField(initValue, fieldSize);
             fields[i].setEditable(false);
 
             // Label
@@ -237,9 +244,10 @@ public class SimulatorUI extends JFrame {
 
         String[] regNames = {"PC", "MAR", "MBR", "IR"};
 
-        // Initialize 16-bit registers (PC, MAR, MBR, IR)
-        pcField = new JTextField(REG_INIT_VALUE, 6); pcField.setEditable(false);
-        marField = new JTextField(REG_INIT_VALUE, 6); marField.setEditable(false);
+        // Initialize 12-bit registers (PC, MAR)
+        pcField = new JTextField(REG_12BIT_INIT_VALUE, 4); pcField.setEditable(false);
+        marField = new JTextField(REG_12BIT_INIT_VALUE, 4); marField.setEditable(false);
+        // Initialize 16-bit registers (MBR, IR)
         mbrField = new JTextField(REG_INIT_VALUE, 6); mbrField.setEditable(false);
         irField = new JTextField(REG_INIT_VALUE, 6); irField.setEditable(false);
 
@@ -402,11 +410,15 @@ public class SimulatorUI extends JFrame {
     public void updateDisplays() {
         MachineState state = controller.getMachineState();
 
-        // Update Internal Registers (Octal format: %06o for 6 octal digits)
-        pcField.setText(String.format("%06o", state.getPC()));
-        marField.setText(String.format("%06o", state.getMAR()));
+        // PC and MAR are 12-bit, displayed as %04o (4 octal digits)
+        pcField.setText(String.format("%04o", state.getPC()));
+        marField.setText(String.format("%04o", state.getMAR()));
+
+        // MBR and IR are 16-bit, displayed as %06o (6 octal digits)
         mbrField.setText(String.format("%06o", state.getMBR()));
         irField.setText(String.format("%06o", state.getIR()));
+
+        // CC and MFR are 4-bit, displayed as %04o (4 octal digits)
         ccField.setText(String.format("%04o", state.getCC()));
         mfrField.setText(String.format("%04o", state.getMFR()));
 

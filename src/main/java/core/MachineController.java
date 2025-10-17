@@ -13,12 +13,20 @@ public class MachineController {
     private SimulatorUI ui; // Need to link back to the UI to update the display and printer
     private boolean isRunning = false;
 
+    // Mask for 12-bit registers (PC, MAR) = 0xFFF
+    private static final int MASK_12_BIT = 0b0000111111111111;
     // Constants based on the 16-bit ISA structure (Opcode: 6, R: 2, IX: 2, I: 1, Address: 5)
     private static final int OPCODE_MASK = 0b111111; // 6 bits
     private static final int R_MASK = 0b11; // 2 bits
     private static final int IX_MASK = 0b11; // 2 bits
     private static final int I_MASK = 0b1; // 1 bit
     private static final int ADDRESS_MASK = 0b11111; // 5 bits
+
+    // --- MFR and Reserved Memory Constants (ISA Defined) ---
+    private static final int FAULT_ILLEGAL_OPCODE = 4; // MFR 0100 (ID 2)
+    private static final int FAULT_ILLEGAL_MEM_RESERVED = 1; // MFR 0001 (ID 1)
+    private static final int FAULT_ILLEGAL_MEM_BEYOND = 8; // MFR 1000 (ID 3)
+    private static final int RESERVED_MEM_END = 5; // Addresses 0 through 5
 
     //Match with OpCodeTables
     private static final int OPCODE_HLT = 0;   // Octal 000
@@ -100,16 +108,17 @@ public class MachineController {
 
         if (executionStartPC != 0) {
             // Option A: Assembler set M[5]. This is the desired execution start.
+            executionStartPC &= MASK_12_BIT;
             state.setPC(executionStartPC);
             state.setMAR(executionStartPC);
             ui.getPrinterArea().append("IPL successful. Loaded " + linesRead + " instructions.\n");
-            ui.getPrinterArea().append(String.format("PC set from M[5] to execution start address: %06o\n", executionStartPC));
         } else if (firstAddress != -1) {
-            // Option B: Fallback. M[5] is 0. Use the very first address loaded (e.g., 000006).
+            // Option B: Fallback. M[5] is 0. Use the very first address loaded (e.g., 0006).
             // This is primarily for visualization/debugging, acknowledging that execution may fail (hit HLT).
+            firstAddress &= MASK_12_BIT;
             state.setPC(firstAddress);
             state.setMAR(firstAddress);
-            ui.getPrinterArea().append("IPL warning: M[5] not set. PC set to first loaded location: " + String.format("%06o", firstAddress) + ". Execution may start at data.\n");
+            ui.getPrinterArea().append("IPL warning: M[5] not set. PC set to first loaded location: " + String.format("%04o", firstAddress) + ". Execution may start at data.\n");
         } else {
             // No program loaded
             ui.getPrinterArea().append("IPL warning: Load file was empty. PC remains 0.\n");
@@ -154,7 +163,7 @@ public class MachineController {
         int i = (instruction >> 5) & I_MASK;
         int address = instruction & ADDRESS_MASK;
 
-        ui.getPrinterArea().append(String.format("PC=%06o: Op=%02o, R=%d, IX=%d, I=%d, Addr=%d", pc, opcode, reg, ix, i, address));
+        ui.getPrinterArea().append(String.format("PC=%04o: Op=%02o, R=%d, IX=%d, I=%d, Addr=%d", pc, opcode, reg, ix, i, address));
 
         // 3. EXECUTE
         int nextPC = pc + 1;
@@ -193,7 +202,7 @@ public class MachineController {
 
         ui.updateDisplays();
 
-        // CRITICAL FIX: If it was NOT a continuous run, reset isRunning
+        // If it was NOT a continuous run, reset isRunning
         if (!continuousRun) {
             isRunning = false;
         }
@@ -210,7 +219,7 @@ public class MachineController {
             try {
                 while (isRunning && state.getMFR() == 0) {
 
-                    // CRITICAL FIX: Queue singleStep execution onto the EDT
+                    // Queue singleStep execution onto the EDT
                     // This ensures all UI access (printing, updateDisplays) happens safely.
                     // We use invokeAndWait for immediate execution required by the loop.
                     SwingUtilities.invokeAndWait(() -> {
@@ -262,7 +271,7 @@ public class MachineController {
             handleHLT();
             return -1;
         }
-        return EA;
+        return EA & MASK_12_BIT;
     }
 
     // --- Instruction Handlers ---
@@ -329,7 +338,7 @@ public class MachineController {
         // JMA: PC <- EA (R is ignored)
         int EA = calculateEA(ix, i, address);
         if (EA != -1) {
-            ui.getPrinterArea().append(String.format(" -> JMA Taken. PC <- %06o", EA));
+            ui.getPrinterArea().append(String.format(" -> JMA Taken. PC <- %04o", EA));
             return EA;
         }
         return state.getPC() + 1;
@@ -351,16 +360,24 @@ public class MachineController {
             String type = parts[0];
             int index = (parts.length > 1) ? Integer.parseInt(parts[1]) : -1;
 
+            // Apply 12-bit mask for PC and MAR if they are the target
+            int maskedValue = value;
+            if (type.equals("PC") || type.equals("MAR")) {
+                maskedValue &= MASK_12_BIT;
+            }
+
             switch (type) {
                 case "GPR": state.setGPR(index, value); break;
                 case "IXR": state.setIXR(index, value); break;
-                case "PC": state.setPC(value); break;
-                case "MAR": state.setMAR(value); break;
+                case "PC": state.setPC(maskedValue); break;
+                case "MAR": state.setMAR(maskedValue); break;
                 case "MBR": state.setMBR(value); break;
                 default: ui.getPrinterArea().append("Error: Unknown register " + registerName + ".\n");
             }
             ui.updateDisplays();
-            ui.getPrinterArea().append(String.format("Manual Load: %s set to %06o.\n", registerName, value));
+            String format = (type.equals("PC") || type.equals("MAR")) ? "%04o" : "%06o";
+            int displayValue = (type.equals("PC") || type.equals("MAR")) ? maskedValue : value;
+            ui.getPrinterArea().append(String.format("Manual Load: %s set to " + format + ".\n", registerName, displayValue));
         } catch (NumberFormatException e) {
             ui.getPrinterArea().append("Error: Invalid octal value in input field.\n");
         }
@@ -379,21 +396,21 @@ public class MachineController {
             switch (command) {
                 case "Load": // Load M[MAR] -> MBR
                     state.setMBR(state.getMemory(currentMAR));
-                    ui.getPrinterArea().append(String.format("Console Load: M[%06o] -> MBR = %06o\n", currentMAR, state.getMBR()));
+                    ui.getPrinterArea().append(String.format("Console Load: M[%04o] -> MBR = %06o\n", currentMAR, state.getMBR()));
                     break;
                 case "Load+": // Load M[MAR] -> MBR; MAR++
                     state.setMBR(state.getMemory(currentMAR));
-                    state.setMAR(currentMAR + 1);
-                    ui.getPrinterArea().append(String.format("Console Load+: M[%06o] -> MBR; MAR++ to %06o\n", currentMAR, state.getMAR()));
+                    state.setMAR((currentMAR + 1) & MASK_12_BIT);
+                    ui.getPrinterArea().append(String.format("Console Load+: M[%04o] -> MBR; MAR++ to %04o\n", currentMAR, state.getMAR()));
                     break;
                 case "Store": // Store MBR -> M[MAR]
                     state.setMemory(currentMAR, currentMBR);
-                    ui.getPrinterArea().append(String.format("Console Store: M[%06o] <- MBR = %06o\n", currentMAR, currentMBR));
+                    ui.getPrinterArea().append(String.format("Console Store: M[%04o] <- MBR = %06o\n", currentMAR, currentMBR));
                     break;
                 case "Store+": // Store MBR -> M[MAR]; MAR++
                     state.setMemory(currentMAR, currentMBR);
-                    state.setMAR(currentMAR + 1);
-                    ui.getPrinterArea().append(String.format("Console Store+: M[%06o] <- MBR; MAR++ to %06o\n", currentMAR, state.getMAR()));
+                    state.setMAR((currentMAR + 1) & MASK_12_BIT);
+                    ui.getPrinterArea().append(String.format("Console Store+: M[%04o] <- MBR; MAR++ to %04o\n", currentMAR, state.getMAR()));
                     break;
                 case "Run":
                     runProgram();
