@@ -11,8 +11,8 @@ public class Assembler {
     // Tracks current address during assembly
     public int currentAddress = 0;
 
-    // NEW: Tracks the address of the first actual instruction (not LOC, not Data)
-    public int firstInstructionAddress = -1;
+//    // NEW: Tracks the address of the first actual instruction (not LOC, not Data)
+//    public int firstInstructionAddress = -1;
 
     // Output file names
     public String LISTING_FILE = "ListingFile.txt";
