@@ -394,6 +394,10 @@ public class SimulatorUI extends JFrame {
         return printerArea;
     }
 
+    public JTextField getConsoleInputField() {
+        return consoleInputField;
+    }
+
     // Public getter for the Octal Input field (needed by MachineController for manual loads)
     public JTextField getOctalInputField() {
         return octalInputField;
