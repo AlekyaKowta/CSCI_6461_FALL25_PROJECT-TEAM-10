@@ -11,7 +11,7 @@ Alekya Kowta
 
 ## Project Structure
 ### Component 0: 
-Assembler 
+src.assembler.Assembler 
 
 ### Component I: 
 Basic Machine

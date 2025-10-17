@@ -85,6 +85,13 @@ public class Assembler {
                 }
 
                 // Format: [ADDRESS  VALUE] [Source Line]
+        int outputIndex = 0;
+        for (String sourceLine : originalLines) {
+            if (isSkippableLine(sourceLine)) {
+                dataToWrite.add(sourceLine); // Just the original source line (LOC, blank, comment, label)
+            } else {
+                // Only increment outputIndex for lines that actually produce code
+                String resultLine = (outputIndex < machineCodeOctal.size()) ? machineCodeOctal.get(outputIndex++) : "";
                 dataToWrite.add(String.format("%s %s", resultLine, sourceLine));
             }
         }
@@ -485,4 +492,5 @@ public class Assembler {
             System.exit(1);
         }
     }
+}
 }
