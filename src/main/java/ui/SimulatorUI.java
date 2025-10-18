@@ -12,6 +12,19 @@ import java.awt.event.ActionListener;
 import java.io.File;
 import java.io.IOException;
 
+/**
+ * The SimulatorUI class represents the graphical user interface (GUI), acting as the
+ * front panel for the C6461 machine simulator.
+ * * It is built using Java Swing and is responsible for:
+ * 1. **Visualizing Machine State:** Displaying the current values of all registers (GPRs,
+ * PC, MAR, MBR, etc.) and memory in the required ISA octal format.
+ * 2. **Handling User Input:** Processing all operator actions, including button clicks
+ * (IPL, Run, Step), manual data deposit into registers, and console controls.
+ * 3. **Interface to CPU:** Communicating user events to the MachineController for execution
+ * and updating its own displays based on the results from the MachineState.
+ * * The UI ensures architectural compliance by displaying PC/MAR in 4-digit octal and
+ * 16-bit registers in 6-digit octal format.
+ */
 public class SimulatorUI extends JFrame {
 
     // --- Custom Colors and Constants ---

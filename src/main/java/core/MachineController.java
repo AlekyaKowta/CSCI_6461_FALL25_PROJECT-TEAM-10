@@ -8,6 +8,14 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
 
+/**
+*Serves as the Central Processing Unit (CPU) logic for the C6461 machine simulator.
+*  Its primary responsibilities are managing the fetch-decode-execute cycle, enforcing all
+* Instruction Set Architecture (ISA) compliance rules, and handling all data flow between the
+* MachineState (hardware model) and the SimulatorUI (front panel).
+* The controller enforces architectural constraints such as the 12-bit address space,
+* handles memory-related faults, and contains the modular logic for every implemented opcode.
+ **/
 public class MachineController {
     private MachineState state;
     private SimulatorUI ui;
@@ -304,6 +312,9 @@ public class MachineController {
         ui.updateDisplays();
     }
 
+    /**
+    Run Program
+     **/
     public void runProgram() {
         if (isRunning) return;
         isRunning = true;
@@ -345,6 +356,9 @@ public class MachineController {
 
     // region Execution Helpers (EA Calculation, CC, Instruction Handlers)
 
+    /**
+    * Calculate EA with Security Gate
+     **/
     private int calculateEA(int ix, int i, int address) {
         int EA = address;
 
