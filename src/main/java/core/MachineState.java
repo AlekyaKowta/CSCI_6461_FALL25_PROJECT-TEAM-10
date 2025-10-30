@@ -1,16 +1,25 @@
-package src.main.java.core;
+package core;
+
+import src.main.java.core.cache.Cache;
 
 public class MachineState {
     public final int MEMORY_SIZE = 2048;
     private int[] memory = new int[MEMORY_SIZE];
-    
+
     // Registers (16-bit, stored as int, masked on update)
     private int PC, MAR, MBR, IR, CC, MFR;
     private int[] GPR = new int[4]; // General Purpose Registers R0-R3
     private int[] IXR = new int[4]; // Index Registers X0-X3 (X0 usually unused, or used as a GPR)
 
+    private Cache cache;
+
     public MachineState() {
         initialize();
+        cache = new Cache(this);
+    }
+
+    public Cache getCache() {
+        return cache;
     }
 
     /**
@@ -28,6 +37,11 @@ public class MachineState {
             // IXR[0] is not used, but initialize all for array safety
             IXR[i] = 0;
         }
+
+        // Also initialize the cache
+        if (cache != null) {
+            cache.initialize();
+        }
     }
 
 
@@ -39,7 +53,9 @@ public class MachineState {
             MFR = 1;
             return 0;
         }
-        return memory[address];
+        //return memory[address];
+
+        return cache.readWord(address);
     }
 
     public void setMemory(int address, int value) {
@@ -48,9 +64,29 @@ public class MachineState {
             return;
         }
         // Mask to 16 bits (0xFFFF = 65535)
-        memory[address] = value & 0xFFFF;
+        //memory[address] = value & 0xFFFF;
+        cache.writeWord(address, value);
     }
 
+// --- Direct Memory Access (Used ONLY by Cache) ---
+
+    // Renamed the original getter and made it public for Cache access
+    public int getMemoryDirect(int address) {
+        if (address < 0 || address >= MEMORY_SIZE) {
+            // Only trigger fault if address is illegal (should be handled by public methods)
+            return 0;
+        }
+        return memory[address];
+    }
+
+    public void setMemoryDirect(int address, int value) {
+        if (address < 0 || address >= MEMORY_SIZE) {
+            // Only trigger fault if address is illegal
+            return;
+        }
+        // Mask to 16 bits (0xFFFF = 65535)
+        memory[address] = value & 0xFFFF;
+    }
     // --- Register Getters and Setters ---
 
     // Helper to ensure 16-bit value
