@@ -84,7 +84,7 @@ public class Cache {
         int offset = components[1];
 
         // 1. Write-Through to Main Memory (Always happens)
-        machineState.setMemory(address, value);
+        machineState.setMemoryDirect(address, value);
 
         // 2. Update Cache (on a Hit)
         for (CacheLine line : lines) {
@@ -111,22 +111,26 @@ public class Cache {
      * @return The CacheLine to be replaced.
      */
     private CacheLine findVictimLine() {
-        CacheLine oldestLine = lines[0];
-        int minAge = oldestLine.getAge();
+        CacheLine oldestLine = null;
+        int minAge = Integer.MAX_VALUE; // Initialize to max to ensure any valid age is smaller
 
         for (CacheLine line : lines) {
-            // 1. Check for an empty (invalid) line first
+            // 1. Check for an empty (invalid) line first (highest priority victim)
             if (!line.isValid()) {
                 System.out.println("Found invalid line for victim.");
                 return line;
             }
-            // 2. Otherwise, find the line with the smallest (oldest) age
+
+            // 2. Otherwise, track the line with the smallest (oldest) age
             if (line.getAge() < minAge) {
                 minAge = line.getAge();
                 oldestLine = line;
             }
         }
+
+        // At this point, the cache is full (no invalid line was found)
         System.out.println("Found oldest line (age: " + minAge + ") for victim.");
+        // oldestLine will be the line with the minimum age, since the loop checked all 16 lines
         return oldestLine;
     }
 
@@ -143,7 +147,7 @@ public class Cache {
 
         int[] blockData = new int[CacheLine.WORDS_PER_LINE];
         for (int i = 0; i < CacheLine.WORDS_PER_LINE; i++) {
-            blockData[i] = machineState.getMemory(blockStartAddress + i);
+            blockData[i] = machineState.getMemoryDirect(blockStartAddress + i);
         }
 
         // Load data into the victim line
