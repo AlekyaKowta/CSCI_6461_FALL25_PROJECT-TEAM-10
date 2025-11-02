@@ -451,6 +451,8 @@ public class SimulatorUI extends JFrame {
         int octalValue = state.getMBR();
         octalInputField.setText(String.format("%06o", octalValue));
         binaryInputField.setText(String.format("%16s", Integer.toBinaryString(octalValue)).replace(' ', '0'));
+
+        cacheContentArea.setText(state.getCache().getCacheStateString());
     }
 
     // --- IPL Button Action Handlers ---

@@ -5,7 +5,7 @@ import src.main.java.core.cache.Cache;
 public class MachineState {
     public final int MEMORY_SIZE = 2048;
     private int[] memory = new int[MEMORY_SIZE];
-    
+
     // Registers (16-bit, stored as int, masked on update)
     private int PC, MAR, MBR, IR, CC, MFR;
     private int[] GPR = new int[4]; // General Purpose Registers R0-R3
@@ -16,6 +16,10 @@ public class MachineState {
     public MachineState() {
         initialize();
         cache = new Cache(this);
+    }
+
+    public Cache getCache() {
+        return cache;
     }
 
     /**
@@ -32,6 +36,11 @@ public class MachineState {
             GPR[i] = 0;
             // IXR[0] is not used, but initialize all for array safety
             IXR[i] = 0;
+        }
+
+        // Also initialize the cache
+        if (cache != null) {
+            cache.initialize();
         }
     }
 
