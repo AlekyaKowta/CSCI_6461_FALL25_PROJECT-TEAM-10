@@ -20,6 +20,8 @@ public class Assembler {
     public String LISTING_FILE = "ListingFile.txt";
     public String LOAD_FILE = "LoadFile.txt";
 
+    public static final int ADDRESS_MASK = 037;
+
     // Symbol Table mapping labels to addresses
     public HashMap<String, Integer> symbolsMap = new HashMap<>();
 
@@ -123,6 +125,40 @@ public class Assembler {
         }
     }
 
+    private int parseAndValidateR(String operand) {
+        int r = Integer.parseInt(operand);
+        if (r < 0 || r > 3) { // R0-R3
+            throw new IllegalArgumentException("Invalid General Purpose Register (R) number: " + r + ". Must be between 0 and 3.");
+        }
+        return r;
+    }
+
+    private int parseAndValidateIX(String operand) {
+        int ix = Integer.parseInt(operand);
+        if (ix < 0 || ix > 3) { // X0-X3 (where 0 means no indexing)
+            throw new IllegalArgumentException("Invalid Index Register (IX) number: " + ix + ". Must be between 0 and 3.");
+        }
+        return ix;
+    }
+
+    private int parseAndValidateAddress(String operand, boolean isImmediate) {
+        // Resolve labels first
+        int address = resolveOperandToAddress(operand);
+        if (address < 0 || address > 31) { // 5 bits unsigned (Maximum absolute value is 31)
+            String field = isImmediate ? "Immediate" : "Address Field";
+            throw new IllegalArgumentException("Invalid " + field + " value: " + address + ". Must be between 0 and 31.");
+        }
+        return address;
+    }
+
+    private int parseAndValidateEvenR(String operand) {
+        int r = Integer.parseInt(operand);
+        if (r != 0 && r != 2) {
+            throw new IllegalArgumentException("Invalid register for Multiply/Divide operation: " + r + ". Must be 0 or 2.");
+        }
+        return r;
+    }
+
     /// <summary>
     /// Parses load/store and related instructions into machine code words.
     /// Instructions supported vary and have different formats; handled via switch-case.
@@ -151,42 +187,49 @@ public class Assembler {
             case "JCC":
             case "JZ":
             case "JNE":
-            case "JMA":
             case "JSR":
             case "SOB":
             case "JGE":
             case "AMR":
             case "SMR":
-                reg = Integer.parseInt(operands[0]);
-                idx = Integer.parseInt(operands[1]);
-                address = resolveOperandToAddress(operands[2]);
+                reg = parseAndValidateR(operands[0]);
+                idx = parseAndValidateIX(operands[1]);
+                address = parseAndValidateAddress(operands[2], false);
                 indirect = (operands.length > 3) ? Integer.parseInt(operands[3]) : 0; // Optional operand
                 return String.format("%06o\t%06o", currentAddress,
                         (opcode << 10) | (reg << 8) | (idx << 6) | (indirect << 5) | address);
 
+            case "JMA":
+                idx = parseAndValidateIX(operands[0]);
+                address = parseAndValidateAddress(operands[1], false);
+                indirect = (operands.length > 2) ? Integer.parseInt(operands[2]) : 0;
+                // Note: (reg << 8) is omitted, setting bits 9-8 to 00.
+                return String.format("%06o\t%06o", currentAddress,
+                        (opcode << 10) | (idx << 6) | (indirect << 5) | address);
+
             // Instructions with format: opcode x,address[,i]
             case "LDX":
             case "STX":
-                idx = Integer.parseInt(operands[0]);
-                address = resolveOperandToAddress(operands[1]);
+                idx = parseAndValidateIX(operands[0]);
+                address = parseAndValidateAddress(operands[1], false);
                 indirect = (operands.length > 2) ? Integer.parseInt(operands[2]) : 0;
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (idx << 6) | (indirect << 5) | address);
 
             // Instructions with format: opcode r[,i]
             case "SETCCE":
-                reg = Integer.parseInt(operands[0]);
+                reg = parseAndValidateR(operands[0]);
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg << 8));
 
             // Instructions with format: opcode address
             case "RFS":
-                address = resolveOperandToAddress(operands[0]);
+                address = parseAndValidateAddress(operands[0], true);
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | address);
 
             // Instructions with format: opcode r,address
             case "AIR":
             case "SIR":
-                reg = Integer.parseInt(operands[0]);
-                address = resolveOperandToAddress(operands[1]);
+                reg = parseAndValidateR(operands[0]);
+                address = parseAndValidateAddress(operands[1], true); // Immed is validated
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg << 8) | address);
 
             default:
@@ -363,13 +406,18 @@ public class Assembler {
         int opcode = OpCodeTables.arithmeticAndLogic.get(instructionComponents[0]);
         String[] operands = parseOperands(instructionComponents[1]);
         int reg1, reg2;
-        if (instructionComponents[0].equals("AND") || instructionComponents[0].equals("ORR")
-                || instructionComponents[0].equals("MLT") || instructionComponents[0].equals("DVD") || instructionComponents[0].equals("TRR")) {
-            reg1 = Integer.parseInt(operands[0]);
-            reg2 = Integer.parseInt(operands[1]);
+        if (instructionComponents[0].equals("MLT") || instructionComponents[0].equals("DVD")) {
+            reg1 = parseAndValidateEvenR(operands[0]);
+            reg2 = parseAndValidateEvenR(operands[1]);
+            machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg1 << 8) | (reg2 << 6)));
+        }
+        else if (instructionComponents[0].equals("AND") || instructionComponents[0].equals("ORR")
+                || instructionComponents[0].equals("TRR")) {
+            reg1 = parseAndValidateR(operands[0]);
+            reg2 = parseAndValidateR(operands[1]);
             machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg1 << 8) | (reg2 << 6)));
         } else if (instructionComponents[0].equals("NOT")) {
-            reg1 = Integer.parseInt(operands[0]);
+            reg1 = parseAndValidateR(operands[0]);
             machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg1 << 8)));
         }
     }
@@ -381,23 +429,30 @@ public class Assembler {
         // NOTE: This assumes OpCodeTables is in scope and initialized
         int opcode = OpCodeTables.shiftRotate.get(instructionComponents[0]);
         String[] operands = parseOperands(instructionComponents[1]);
-        int a = Integer.parseInt(operands[0]);
-        int b = Integer.parseInt(operands[1]);
-        int c = Integer.parseInt(operands[2]);
-        int d = Integer.parseInt(operands[3]);
-        machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (a << 8) | (d << 7) | (c << 6) | b));
+        int r = parseAndValidateR(operands[0]); // R field (a)
+        int count = Integer.parseInt(operands[1]); // Count field (b)
+        int lr = Integer.parseInt(operands[2]); // L/R field (c)
+        int al = Integer.parseInt(operands[3]); // A/L field (d)
+
+        if (count < 0 || count > 15) {
+            throw new IllegalArgumentException("Invalid Count value for Shift/Rotate: " + count + ". Must be between 0 and 15 (4 bits).");
+        }
+        machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (r << 8) | (al << 7) | (lr << 6) | count));
     }
 
     /// <summary>
     /// Additional Helper Methods for secondPass: IO
     /// </summary>
     private void handleIO(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
-        // NOTE: This assumes OpCodeTables is in scope and initialized
         int opcode = OpCodeTables.io.get(instructionComponents[0]);
         String[] operands = parseOperands(instructionComponents[1]);
-        Arrays.setAll(operands, i -> operands[i].trim());
-        int r = Integer.parseInt(operands[0]);
+        int r = parseAndValidateR(operands[0]);
         int devId = Integer.parseInt(operands[1]);
+
+        if (devId < 0 || devId > 31) {
+            throw new IllegalArgumentException("Invalid Device ID: " + devId + ". Must be between 0 and 31 (5 bits).");
+        }
+
         machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (r << 8) | devId));
     }
 
@@ -405,7 +460,6 @@ public class Assembler {
     /// Additional Helper Methods for secondPass: Miscellaneous
     /// </summary>
     private void handleMisc(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
-        // NOTE: This assumes OpCodeTables is in scope and initialized
         int opcode = OpCodeTables.miscellaneous.get(instructionComponents[0]);
         switch (instructionComponents[0]) {
             case "HLT":
@@ -414,6 +468,9 @@ public class Assembler {
             case "TRAP":
                 if (instructionComponents.length > 1) {
                     int operand = Integer.parseInt(instructionComponents[1]);
+                    if (operand < 0 || operand > 15) {
+                        throw new IllegalArgumentException("Invalid TRAP code: " + operand + ". Must be between 0 and 15 (4 bits).");
+                    }
                     machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | operand));
                 } else {
                     machineCodeOctal.add("ERROR: Missing operand for TRAP instruction!");
