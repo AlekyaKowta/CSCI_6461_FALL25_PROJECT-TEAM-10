@@ -150,6 +150,28 @@ public class SimulatorUI extends JFrame {
                 // Not used for plain text fields
             }
         });
+
+        consoleInputField.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                String input = consoleInputField.getText();
+                if (!input.isEmpty()) {
+                    // Deposit the input into the controller's buffer
+                    controller.depositInput(input);
+
+                    // Clear the input field after deposit for a clean look
+                    consoleInputField.setText("");
+
+                    // Print the user's input to the printer area for confirmation
+                    printerArea.append(">> " + input + "\n");
+
+                    // If the machine is paused (waiting for input), resume it
+                    if (!controller.isRunning()) {
+                        controller.runProgram();
+                    }
+                }
+            }
+        });
     }
 
     /**

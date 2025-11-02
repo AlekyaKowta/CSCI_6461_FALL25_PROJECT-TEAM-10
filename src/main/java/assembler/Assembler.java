@@ -369,10 +369,10 @@ public class Assembler {
             BiConsumer<String[], ArrayList<String>> handler = handlerMap.get(opcode);
             if (handler != null) {
                 handler.accept(instructionComponents, machineCodeOctal);
+                currentAddress++;
             } else {
                 machineCodeOctal.add("ERROR: Unknown instruction!");
             }
-            currentAddress++;
         }
 
         // Delete Reserved Space code

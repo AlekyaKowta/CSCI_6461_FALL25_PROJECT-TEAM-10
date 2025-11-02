@@ -19,7 +19,7 @@ import java.io.IOException;
 public class MachineController {
     private MachineState state;
     private SimulatorUI ui;
-    private boolean isRunning = false;
+    public boolean isRunning = false;
 
     // --- Masks and Constants ---
     private static final int MASK_12_BIT = 0b0000111111111111; // 4095
@@ -39,6 +39,8 @@ public class MachineController {
     private static final int FAULT_ILLEGAL_OPCODE = 4; // MFR 0100 (ID 2)
     private static final int FAULT_ILLEGAL_MEM_BEYOND = 8; // MFR 1000 (ID 3)
     private static final int RESERVED_MEM_END = 5;
+
+    private java.util.Queue<Integer> inputBuffer = new java.util.LinkedList<>();
 
     // Condition Code Bits (4 bits: CC(0) to CC(3))
     private static final int CC_OVERFLOW = 0b1000; // cc(0)
@@ -88,6 +90,10 @@ public class MachineController {
 
     public MachineState getMachineState() {
         return state;
+    }
+
+    public boolean isRunning() {
+        return this.isRunning;
     }
 
     // region IPL and Control
@@ -744,20 +750,39 @@ public class MachineController {
 
     // --- I/O Operations ---
 
-    private void handleIN(int r, int devid) {
+    /**
+     * Handles IN instruction.
+     * @return true if execution can continue, false if waiting for input.
+     */
+    private boolean handleIN(int r, int devid) {
         if (devid == DEVID_KEYBOARD) {
-            String input = ui.getConsoleInputField().getText();
-            int charValue = 0;
-            if (input.length() > 0) {
-                charValue = input.charAt(0);
-                state.setGPR(r, charValue & 0xFF);
+            if (!inputBuffer.isEmpty()) {
+                int charValue = inputBuffer.poll(); // Get and remove the head character (ASCII)
+                state.setGPR(r, charValue & 0xFFFF); // Store the full 16-bit value
+
                 ui.getPrinterArea().append(String.format(" -> IN R%d <- Console Char '%c'", r, (char)charValue));
+                return true; // <<<--- RETURN TRUE (Success)
             } else {
-                ui.getPrinterArea().append(String.format(" -> IN R%d: Console Input Empty.", r));
+                // Input buffer is empty. Pause and wait.
+                ui.getPrinterArea().append(String.format(" -> IN R%d: Waiting for Console Input...", r));
+
+                isRunning = false;
+                SwingUtilities.invokeLater(() -> ui.setStepRunButtonsEnabled(true));
+                return false; // <<<--- RETURN FALSE (Waiting)
             }
+            // END FIX
         } else {
             ui.getPrinterArea().append(String.format(" -> IN R%d: DevID %d not implemented.", r, devid));
+            return true; // (Success for other devices)
         }
+    }
+
+    public void depositInput(String input) {
+        for (char c : input.toCharArray()) {
+            inputBuffer.offer((int) c);
+        }
+        // Optional: Add a newline character to terminate the line visually
+        inputBuffer.offer((int) '\n');
     }
 
     private void handleOUT(int r, int devid) {
