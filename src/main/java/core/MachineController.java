@@ -229,8 +229,8 @@ public class MachineController {
         // Decoding needs to use correct bits based on Table 9 format
         // The R field is bits 10-11, A/L is bit 8, L/R is bit 9, Count is bits 0-3.
         int sr_r = (instruction >> 10) & R_MASK;
-        int lr = (instruction >> 9) & 0b1;
-        int al = (instruction >> 8) & 0b1;
+        int al = (instruction >> 7) & 0b1;
+        int lr = (instruction >> 6) & 0b1;
         int count = instruction & COUNT_MASK;
 
 
@@ -360,19 +360,19 @@ public class MachineController {
     * Calculate EA with Security Gate
      **/
     private int calculateEA(int ix, int i, int address) {
-        int EA = address;
+        int EA;
 
-        // C(IX) + Address
-        if (ix > 0) {
-            // Index 0 of IXR array is generally unused; X1 is at index 1.
-            EA += state.getIXR(ix);
+        if (ix == 0) {
+            EA = address;
+        } else {
+            // Else If c(IX) = 1..3, Then EA = c(IX) + c(Address) [cite: 191, 193]
+            EA = state.getIXR(ix) + address;
         }
 
         // Indirect Addressing: I=1. EA <- C(EA)
         if (i == 1) {
             EA = state.getMemory(EA);
         }
-
         if (EA < 0 || EA >= state.MEMORY_SIZE) {
             state.setMFR(FAULT_ILLEGAL_MEM_BEYOND);
             handleHLT();
@@ -477,41 +477,52 @@ public class MachineController {
 
     private void handleAIR(int r, int immediate) {
         int rValue = signExtend(state.getGPR(r));
-        long result = (long)rValue + immediate;
+        long result;
 
         if (immediate == 0) {
-            ui.getPrinterArea().append(String.format(" -> AIR R%d: Immed=0. No change.", r));
+            ui.getPrinterArea().append(String.format(" -> AIR R%d: Immed=0. No change (Note 1).", r));
             return;
         }
-
+        if ((state.getGPR(r) & MASK_16_BIT) == 0) {
+            result = immediate;
+            ui.getPrinterArea().append(String.format(" -> AIR R%d <- Immed=%d (Note 2)", r, immediate));
+        } else {
+            result = (long)rValue + immediate;
+            ui.getPrinterArea().append(String.format(" -> AIR R%d <- R%d + %d = %06o", r, r, immediate, (int)result & MASK_16_BIT));
+        }
         setCC_Arithmetic(result);
         state.setGPR(r, (int)result & MASK_16_BIT);
-        ui.getPrinterArea().append(String.format(" -> AIR R%d <- R%d + %d = %06o", r, r, immediate, state.getGPR(r)));
     }
 
     private void handleSIR(int r, int immediate) {
         int rValue = signExtend(state.getGPR(r));
-        long result = (long)rValue - immediate;
+        long result;
 
         if (immediate == 0) {
-            ui.getPrinterArea().append(String.format(" -> SIR R%d: Immed=0. No change.", r));
+            ui.getPrinterArea().append(String.format(" -> SIR R%d: Immed=0. No change (Note 1).", r));
             return;
         }
 
+        if ((state.getGPR(r) & MASK_16_BIT) == 0) {
+            result = -immediate;
+            ui.getPrinterArea().append(String.format(" -> SIR R%d <- -(Immed)=%d (Note 2)", r, result));
+        } else {
+            result = (long)rValue - immediate;
+            ui.getPrinterArea().append(String.format(" -> SIR R%d <- R%d - %d = %06o", r, r, immediate, (int)result & MASK_16_BIT));
+        }
         setCC_Arithmetic(result);
         state.setGPR(r, (int)result & MASK_16_BIT);
-        ui.getPrinterArea().append(String.format(" -> SIR R%d <- R%d - %d = %06o", r, r, immediate, state.getGPR(r)));
     }
 
     // --- Arithmetic/Logical (Reg-Reg) Instructions ---
 
     private void handleMLT(int rx, int ry) {
-        if (rx % 2 != 0 || ry % 2 != 0) {
-            ui.getPrinterArea().append(" -> MLT Fault: rx or ry not 0 or 2.");
-            state.setMFR(FAULT_ILLEGAL_OPCODE);
-            handleHLT();
-            return;
-        }
+//        if (rx % 2 != 0 || ry % 2 != 0) {
+//            ui.getPrinterArea().append(" -> MLT Fault: rx or ry not 0 or 2.");
+//            state.setMFR(FAULT_ILLEGAL_OPCODE);
+//            handleHLT();
+//            return;
+//        }
 
         long op1 = signExtend(state.getGPR(rx));
         long op2 = signExtend(state.getGPR(ry));
@@ -533,12 +544,12 @@ public class MachineController {
     }
 
     private void handleDVD(int rx, int ry) {
-        if (rx % 2 != 0 || ry % 2 != 0) {
-            ui.getPrinterArea().append(" -> DVD Fault: rx or ry not 0 or 2.");
-            state.setMFR(FAULT_ILLEGAL_OPCODE);
-            handleHLT();
-            return;
-        }
+//        if (rx % 2 != 0 || ry % 2 != 0) {
+//            ui.getPrinterArea().append(" -> DVD Fault: rx or ry not 0 or 2.");
+//            state.setMFR(FAULT_ILLEGAL_OPCODE);
+//            handleHLT();
+//            return;
+//        }
 
         int divisor = state.getGPR(ry);
         state.setCC(state.getCC() & ~(CC_DIVZERO | CC_OVERFLOW));
