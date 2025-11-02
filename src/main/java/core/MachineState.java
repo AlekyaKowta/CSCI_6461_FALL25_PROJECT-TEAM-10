@@ -50,7 +50,7 @@ public class MachineState {
     public int getMemory(int address) {
         if (address < 0 || address >= MEMORY_SIZE) {
             // Trigger a Machine Fault (Illegal Memory Address)
-            MFR = 1;
+            MFR = 8;
             return 0;
         }
         //return memory[address];

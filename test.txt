@@ -1,0 +1,16 @@
+; ----------------------------------------------------------------------
+; Program 1 - Phase 1: Read and Print One Character (ASCII)
+; This program prompts for input, reads one character, prints it, and halts.
+; ----------------------------------------------------------------------
+
+LOC 6       ; Start loading at address 6 (first non-reserved memory)
+
+MAIN:
+; 1. INPUT: Read character from Console Keyboard (DevID 0) into R0
+IN 0, 0     ; R0 <- Character (ASCII) from Keyboard
+
+; 2. OUTPUT: Print character from R0 to Console Printer (DevID 1)
+OUT 0, 1    ; Printer <- C(R0)
+
+; 3. HALT
+HLT         ; Stop execution
