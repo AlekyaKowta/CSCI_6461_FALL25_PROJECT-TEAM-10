@@ -244,6 +244,7 @@ public class MachineController {
 
         // 3. EXECUTE
         int nextPC = pc + 1;
+        boolean instructionCompleted = true;
 
         try {
             switch (opcode) {
@@ -286,7 +287,7 @@ public class MachineController {
                 case OPCODE_RRC: handleRRC(sr_r, count, lr, al); break;
 
                 // I/O
-                case OPCODE_IN: handleIN(reg, devid); break;
+                case OPCODE_IN: instructionCompleted = handleIN(reg, devid); break;
                 case OPCODE_OUT: handleOUT(reg, devid); break;
                 case OPCODE_CHK: handleCHK(reg, devid); break;
 
@@ -307,14 +308,31 @@ public class MachineController {
 
         // 4. Update PC (only if not halted)
         if (state.getMFR() == 0) {
-            state.setPC(nextPC);
-            state.setMAR(nextPC);
+            if (instructionCompleted) {
+                // If instruction completed (not an IN waiting for input), advance PC
+                state.setPC(nextPC);
+                state.setMAR(nextPC);
+
+                // If it was NOT a continuous run, reset isRunning
+                if (!continuousRun) {
+                    isRunning = false;
+                }
+            } else {
+                // Instruction was IN and is waiting. Don't advance PC.
+                // Stop the continuous run and re-enable controls.
+                isRunning = false;
+                SwingUtilities.invokeLater(() -> ui.setStepRunButtonsEnabled(true));
+            }
+        } else {
+            // If a fault occurred, ensure isRunning is set to false and controls re-enabled
+            handleHLT();
+            return;
         }
 
         // If it was NOT a continuous run, reset isRunning
-        if (!continuousRun) {
-            isRunning = false;
-        }
+//        if (!continuousRun) {
+//            isRunning = false;
+//        }
         ui.updateDisplays();
     }
 
@@ -766,11 +784,10 @@ public class MachineController {
                 // Input buffer is empty. Pause and wait.
                 ui.getPrinterArea().append(String.format(" -> IN R%d: Waiting for Console Input...", r));
 
-                isRunning = false;
-                SwingUtilities.invokeLater(() -> ui.setStepRunButtonsEnabled(true));
+//                isRunning = false;
+//                SwingUtilities.invokeLater(() -> ui.setStepRunButtonsEnabled(true));
                 return false; // <<<--- RETURN FALSE (Waiting)
             }
-            // END FIX
         } else {
             ui.getPrinterArea().append(String.format(" -> IN R%d: DevID %d not implemented.", r, devid));
             return true; // (Success for other devices)

@@ -233,7 +233,7 @@ public class Assembler {
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg << 8) | address);
 
             default:
-                return "ERROR: Unknown or invalid instruction!";
+                return String.format("ERROR: Unknown or invalid instruction! Mnemonic: %s", instructionComponents[0]);
         }
     }
 
@@ -371,7 +371,7 @@ public class Assembler {
                 handler.accept(instructionComponents, machineCodeOctal);
                 currentAddress++;
             } else {
-                machineCodeOctal.add("ERROR: Unknown instruction!");
+                machineCodeOctal.add(String.format("ERROR: Unknown instruction! Mnemonic: %s", opcode));
             }
         }
 
