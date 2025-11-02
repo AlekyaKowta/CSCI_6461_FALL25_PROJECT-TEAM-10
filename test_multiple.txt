@@ -1,0 +1,42 @@
+; Echo multiple characters until ENTER (CR=13 or LF=10)
+; Correct branch form:  JZ r, x, address
+; Ensure loop jump targets the IN instruction exactly.
+
+LOC 6
+
+MAIN:
+    JMA 0, SETUP, 0
+
+SETUP:
+    ; Print prompt '>'  (62 = 31 + 31)
+    LDA 0, 0, 0
+    AIR 0, 31
+    AIR 0, 31
+    OUT 0, 1
+
+READ_IN:                     ; ← place label on the IN line (PC should be 0013)
+    IN  0, 0                 ; read next char
+
+    ; Check CR (13)
+    SIR 0, 13
+    JZ  0, 0, DONE
+    AIR 0, 13                ; restore R0
+
+    ; Check LF (10)
+    SIR 0, 10
+    JZ  0, 0, DONE
+    AIR 0, 10                ; restore R0
+
+    ; Not CR/LF → echo it
+    OUT 0, 1
+    JMA 0, 11, 0        ;  ; <-- 11 (decimal) = 0013 (octal). Jump back to READ_IN/IN.
+
+DONE:
+    ; Newline and halt
+    LDA 0, 0, 0
+    AIR 0, 13
+    OUT 0, 1
+    LDA 0, 0, 0
+    AIR 0, 10
+    OUT 0, 1
+    HLT

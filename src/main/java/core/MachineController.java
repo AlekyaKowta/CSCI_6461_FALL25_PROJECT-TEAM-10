@@ -397,6 +397,13 @@ public class MachineController {
         if (i == 1) {
             EA = state.getMemory(EA);
         }
+        
+        if (EA <= 5) {
+            state.setMFR(FAULT_ILLEGAL_MEM_RESERVED);
+            handleHLT();
+            return -1;
+        }
+
         if (EA < 0 || EA >= state.MEMORY_SIZE) {
             state.setMFR(FAULT_ILLEGAL_MEM_BEYOND);
             handleHLT();

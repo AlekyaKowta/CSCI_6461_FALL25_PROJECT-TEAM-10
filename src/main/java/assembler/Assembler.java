@@ -246,6 +246,57 @@ public class Assembler {
     /// </summary>
     /// <param name="inputFile">File path to source code</param>
     /// <returns>List of cleaned source lines</returns>
+    // public ArrayList<String> firstPassWithComments(String inputFile, ArrayList<String> originalLines) throws IOException {
+    //     BufferedReader reader = new BufferedReader(new FileReader(inputFile));
+    //     ArrayList<String> cleanLines = new ArrayList<>();
+    //     String row;
+
+    //     while ((row = reader.readLine()) != null) {
+    //         originalLines.add(row);  // preserve comment lines
+    //         String clean = row;
+    //         int commentIndex = row.indexOf(';');
+    //         if (commentIndex != -1) {
+    //             clean = row.substring(0, commentIndex).trim();
+    //         } else {
+    //             clean = row.trim();
+    //         }
+    //         if (!clean.isEmpty()) {
+    //             cleanLines.add(clean);
+    //         }
+    //     }
+    //     reader.close();
+
+    //     currentAddress = 0; // Reset for Pass 1 Symbol Table build
+    //     // Delete reserved code
+    //     // boolean isFirstExecutableInstruction = true; // Flag to track first instruction
+
+    //     // Symbol table build on clean lines
+    //     for (String line : cleanLines) {
+    //         if (line.startsWith("LOC")) {
+    //             String locationString = "LOC";
+    //             currentAddress = Integer.parseInt(line.substring(locationString.length()).trim());
+    //             continue;
+    //         }
+
+    //         int symbolIndex = line.indexOf(':');
+    //         if (symbolIndex != -1) {
+    //             String label = line.substring(0, symbolIndex).trim();
+    //             symbolsMap.put(label, currentAddress);
+    //         }
+
+    //         if (!line.isEmpty()) {
+    //             // Delete reserved space code
+    //             // // If this is the first non-LOC, non-label, non-blank line, record its address.
+    //             // if (isFirstExecutableInstruction && !line.startsWith("Data")) {
+    //             //     this.firstInstructionAddress = currentAddress;
+    //             //     isFirstExecutableInstruction = false;
+    //             // }
+    //             currentAddress++;
+    //         }
+    //     }
+    //     return cleanLines;
+    // }
+
     public ArrayList<String> firstPassWithComments(String inputFile, ArrayList<String> originalLines) throws IOException {
         BufferedReader reader = new BufferedReader(new FileReader(inputFile));
         ArrayList<String> cleanLines = new ArrayList<>();
@@ -270,31 +321,27 @@ public class Assembler {
         // Delete reserved code
         // boolean isFirstExecutableInstruction = true; // Flag to track first instruction
 
-        // Symbol table build on clean lines
-        for (String line : cleanLines) {
-            if (line.startsWith("LOC")) {
-                String locationString = "LOC";
-                currentAddress = Integer.parseInt(line.substring(locationString.length()).trim());
-                continue;
-            }
+for (String line : cleanLines) {
+    if (line.startsWith("LOC")) {
+        currentAddress = Integer.parseInt(line.substring(3).trim());
+        continue;
+    }
 
-            int symbolIndex = line.indexOf(':');
-            if (symbolIndex != -1) {
-                String label = line.substring(0, symbolIndex).trim();
-                symbolsMap.put(label, currentAddress);
-            }
+    int colon = line.indexOf(':');
+    String body = line;
+    if (colon != -1) {
+        String label = line.substring(0, colon).trim();
+        symbolsMap.put(label, currentAddress);
+        body = line.substring(colon + 1).trim(); // what's after the label
+    }
 
-            if (!line.isEmpty()) {
-                // Delete reserved space code
-                // // If this is the first non-LOC, non-label, non-blank line, record its address.
-                // if (isFirstExecutableInstruction && !line.startsWith("Data")) {
-                //     this.firstInstructionAddress = currentAddress;
-                //     isFirstExecutableInstruction = false;
-                // }
-                currentAddress++;
-            }
-        }
+    // Only advance address if there's an actual instruction/directive after the label
+    if (!body.isEmpty()) {
+        currentAddress++;
+    }
+}
         return cleanLines;
+
     }
 
     /// <summary>
@@ -497,56 +544,87 @@ public class Assembler {
     /// Main method to run assembler: reads source file, performs assembly passes, and writes outputs.
     /// </summary>
     public static void main(String[] args) {
-        try {
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+    try {
+        // Ensure L&F is set on the EDT before any Swing UI
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+            try {
+                javax.swing.UIManager.setLookAndFeel(javax.swing.UIManager.getSystemLookAndFeelClassName());
+            } catch (Exception ignored) {}
+        });
 
-            JFileChooser fileChooser = new JFileChooser(".");
-            fileChooser.setDialogTitle("Select Assembly Source File");
+        // Determine input source (CLI arg preferred to avoid chooser in IDE runs)
+        String inputSourceFile;
+        if (args != null && args.length > 0) {
+            inputSourceFile = new java.io.File(args[0]).getAbsolutePath();
+        } else {
+            final String[] chosen = new String[1];
 
-            int userSelection = fileChooser.showOpenDialog(null);
+            // Show JFileChooser on the EDT with a visible owner to avoid macOS window stacking issues
+            javax.swing.SwingUtilities.invokeAndWait(() -> {
+                javax.swing.JFileChooser fileChooser = new javax.swing.JFileChooser(".");
+                fileChooser.setDialogTitle("Select Assembly Source File");
 
-            if (userSelection == JFileChooser.APPROVE_OPTION) {
-                File fileToOpen = fileChooser.getSelectedFile();
-                String inputSourceFile = fileToOpen.getAbsolutePath();
+                javax.swing.JFrame owner = new javax.swing.JFrame();
+                owner.setUndecorated(true);
+                owner.setAlwaysOnTop(true);
+                // Mark as utility window (helps macOS focus behavior)
+                try {
+                    owner.setType(java.awt.Window.Type.UTILITY);
+                } catch (Throwable ignored) { /* not available on older JREs */ }
 
-                Assembler assembler = new Assembler();
+                owner.setLocationRelativeTo(null);
+                owner.setVisible(true);
 
-                ArrayList<String> originalLines = new ArrayList<>();
-
-                // First Pass
-                ArrayList<String> cleanedLines = assembler.firstPassWithComments(inputSourceFile, originalLines);
-
-                // Debug: print symbol table
-                System.out.println("Symbol Table:");
-                for (String key : assembler.symbolsMap.keySet()) {
-                    System.out.println(key + " -> " + assembler.symbolsMap.get(key));
+                try {
+                    int result = fileChooser.showOpenDialog(owner);
+                    if (result == javax.swing.JFileChooser.APPROVE_OPTION) {
+                        chosen[0] = fileChooser.getSelectedFile().getAbsolutePath();
+                    }
+                } finally {
+                    owner.dispose();
                 }
+            });
 
-                // Debug: print cleaned input lines
-                System.out.println("\nOriginal Input Lines:");
-                for (String line : originalLines) {
-                    System.out.println(line);
-                }
-
-                // Second pass
-                assembler.secondPass(cleanedLines);
-                //Generate Listing File
-                assembler.generateListingFile(originalLines, assembler.LISTING_FILE, assembler.machineCodeOctal);
-                System.out.println("\nAssembly completed. Check listingFile.txt and LoadFile.txt for output.");
-            }
-            else{
+            if (chosen[0] == null) {
                 System.out.println("No file selected. Exiting...");
+                return;
             }
-        } catch (IllegalArgumentException e) {
-            System.err.println("ASSEMBLER FATAL ERROR: " + e.getMessage());
-            System.exit(1);
-        } catch (IOException e) {
-            System.err.println("FILE I/O ERROR: " + e.getMessage());
-            System.exit(1);
-        } catch (Exception e) {
-            System.err.println("UNEXPECTED ERROR: " + e.getMessage());
-            e.printStackTrace();
-            System.exit(1);
+            inputSourceFile = chosen[0];
         }
+
+        // === Your original assembly flow (preserves comments via originalLines) ===
+        Assembler assembler = new Assembler();
+
+        java.util.ArrayList<String> originalLines = new java.util.ArrayList<>();
+        // First pass that preserves comments into originalLines
+        java.util.ArrayList<String> cleanedLines = assembler.firstPassWithComments(inputSourceFile, originalLines);
+
+        // Debug: print symbol table
+        System.out.println("Symbol Table:");
+        for (java.util.Map.Entry<String, Integer> e : assembler.symbolsMap.entrySet()) {
+            System.out.println(e.getKey() + " -> " + e.getValue());
+        }
+
+        // Debug: print original input lines (with comments preserved)
+        System.out.println("\nOriginal Input Lines:");
+        for (String line : originalLines) {
+            System.out.println(line);
+        }
+
+        // Second pass + outputs
+        assembler.secondPass(cleanedLines);
+        assembler.generateListingFile(originalLines, assembler.LISTING_FILE, assembler.machineCodeOctal);
+
+        System.out.println("\nAssembly completed. Check listingFile.txt and LoadFile.txt for output.");
+
+    } catch (IllegalArgumentException e) {
+        System.err.println("ASSEMBLER FATAL ERROR: " + e.getMessage());
+    } catch (java.io.IOException e) {
+        System.err.println("FILE I/O ERROR: " + e.getMessage());
+    } catch (Exception e) {
+        System.err.println("UNEXPECTED ERROR: " + e.getMessage());
+        e.printStackTrace();
     }
+}
+
 }
