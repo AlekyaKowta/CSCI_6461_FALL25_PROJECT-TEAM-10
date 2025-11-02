@@ -211,38 +211,54 @@ public class SimulatorUI extends JFrame {
     /**
      * Creates a single column panel for GPR or IXR with register load buttons.
      */
-    private JPanel createRegisterColumn(String title, JTextField[] fields, int start, int end, boolean includeLoadButtons, String initValue, int fieldSize) {
+    private JPanel createRegisterColumn(
+            String title,
+            JTextField[] fields,
+            int start, int end,
+            boolean includeLoadButtons,
+            String initValue,
+            int fieldSize
+    ) {
         JPanel p = new JPanel(new GridBagLayout());
         p.setBackground(LIGHT_BLUE);
         p.setBorder(BorderFactory.createTitledBorder(title));
+
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(3, 3, 3, 3);
-        gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.anchor = GridBagConstraints.WEST;
 
-        // Register fields and Load buttons
         for (int i = start; i < end; i++) {
+            int row = i - start;              // make rows start at 0 inside this panel
+
             String regName = title + " " + i;
-            JLabel label = new JLabel(regName);
+
+            // Label: column 0 (no stretch)
+            gbc.gridx = 0;
+            gbc.gridy = row;
+            gbc.weightx = 0.0;
+            gbc.fill = GridBagConstraints.NONE;
+            p.add(new JLabel(regName), gbc);
+
+            // Field: column 1 (stretch horizontally)
             fields[i] = new JTextField(initValue, fieldSize);
             fields[i].setEditable(false);
 
-            // Label
-            gbc.gridx = 0; gbc.gridy = i;
-            p.add(label, gbc);
-
-            // Field
             gbc.gridx = 1;
+            gbc.gridy = row;
+            gbc.weightx = 1.0;                      // <-- give the text field the width
+            gbc.fill = GridBagConstraints.HORIZONTAL;
             p.add(fields[i], gbc);
 
-            // Load Button
+            // Optional Load button: column 2 (no stretch)
             if (includeLoadButtons) {
                 gbc.gridx = 2;
+                gbc.gridy = row;
+                gbc.weightx = 0.0;
                 gbc.fill = GridBagConstraints.NONE;
                 p.add(createSmallLoadButton(regName), gbc);
-                gbc.fill = GridBagConstraints.HORIZONTAL; // Reset fill
             }
         }
+
         return p;
     }
 
