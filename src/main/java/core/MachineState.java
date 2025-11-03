@@ -93,12 +93,13 @@ public class MachineState {
     private int to16Bit(int value) {
         return value & 0xFFFF;
     }
+    private int to12Bit(int value) { return value & 0x0FFF; }
 
     public int getPC() { return PC; }
-    public void setPC(int value) { PC = to16Bit(value); }
+    public void setPC(int value) { PC = to12Bit(value); }
 
     public int getMAR() { return MAR; }
-    public void setMAR(int value) { MAR = to16Bit(value); }
+    public void setMAR(int value) { MAR = to12Bit(value); }
 
     public int getMBR() { return MBR; }
     public void setMBR(int value) { MBR = to16Bit(value); }
