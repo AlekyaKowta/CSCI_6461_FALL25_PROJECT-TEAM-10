@@ -10,33 +10,39 @@ CONST_45:     Data 45    ; Addr 8
 CONST_10_NL:  Data 10    ; Addr 9
 CONST_ZERO:   Data 0     ; Addr 10
 
-; --- POINTERS (THE FIX) ---
-PTR_VAR_BASE: Data 60    ; Addr 11
+; --- POINTERS ---
+PTR_VAR_BASE:      Data 60    ; Addr 11. Location of our variables
+PTR_STACK_BASE:    Data 1000  ; Addr 12. Top of our stack
+; This is a new, direct-access temp location
+PTR_TEMP_REG:      Data 0     ; Addr 13. For temp R2 storage
 
 ; Subroutine Pointers
-PTR_ReadInt:  Data 200   ; Addr 12
-PTR_PrintInt: Data 300   ; Addr 13
-PTR_AbsVal:   Data 400   ; Addr 14
+PTR_ReadInt:  Data 200   ; Addr 14
+PTR_PrintInt: Data 300   ; Addr 15
+PTR_AbsVal:   Data 400   ; Addr 16
 
-; MAIN Pointers (Corrected)
-PTR_CHECK_N3:      Data 145   ; Addr 15
-PTR_PRINT_RESULTS: Data 154   ; Addr 16
+; MAIN Pointers
+PTR_CHECK_N3:      Data 145   ; Addr 17
+PTR_PRINT_RESULTS: Data 154   ; Addr 18
 
-; ReadInt Pointers (Corrected)
-PTR_ReadLoop:       Data 203   ; Addr 17
-PTR_CheckDigitHi:   Data 215   ; Addr 18
-PTR_NotDigit:       Data 220   ; Addr 19
-PTR_AddDigit:       Data 221   ; Addr 20
-PTR_SetNegFlag:     Data 230   ; Addr 21
-PTR_ReadEnd:        Data 233   ; Addr 22
-PTR_DoNegate:       Data 236   ; Addr 23
+; ReadInt Pointers
+PTR_ReadLoop:       Data 203   ; Addr 19
+PTR_CheckDigitHi:   Data 215   ; Addr 20
+PTR_NotDigit:       Data 220   ; Addr 21
+PTR_AddDigit:       Data 221   ; Addr 22
+PTR_SetNegFlag:     Data 230   ; Addr 23
+PTR_ReadEnd:        Data 233   ; Addr 24
+PTR_DoNegate:       Data 236   ; Addr 25
 
-; PrintInt Pointers
-PTR_PUSH_LOOP_START: Data 306   ; Addr 24
+; PrintInt Pointers (FIXED)
+PTR_Print_Not_Zero: Data 305   ; Addr 26
+PTR_Push_Loop:      Data 313   ; Addr 27
+PTR_Pop_Loop:       Data 324   ; Addr 28
+PTR_Print_End:      Data 332   ; Addr 29
 
 ; AbsVal Pointers
-PTR_AbsEnd:         Data 406   ; Addr 25
-; End of pointers, all are <= 31
+PTR_AbsEnd:         Data 406   ; Addr 30
+; All pointers fit in 6-31
 
 ; --- Variables ---
 ; Base address is 60, accessed via X1
@@ -59,38 +65,30 @@ TEMP_STACK:   Data 0     ; Offset 10
 LOC 100
 MAIN:
     LDX 1, PTR_VAR_BASE
-
 ; --- Read 3 Nums ---
     JSR 0, 0, PTR_ReadInt, 1
     LDR 0, 1, 6
     STR 0, 1, 1
-
     JSR 0, 0, PTR_ReadInt, 1
     LDR 0, 1, 6
     STR 0, 1, 2
-
     JSR 0, 0, PTR_ReadInt, 1
     LDR 0, 1, 6
     STR 0, 1, 3
-
 ; --- Print 3 Nums ---
     LDR 0, 1, 1
     STR 0, 1, 7
     JSR 0, 0, PTR_PrintInt, 1
-
     LDR 0, 1, 2
     STR 0, 1, 7
     JSR 0, 0, PTR_PrintInt, 1
-
     LDR 0, 1, 3
     STR 0, 1, 7
     JSR 0, 0, PTR_PrintInt, 1
-
 ; --- Get Search Num ---
     JSR 0, 0, PTR_ReadInt, 1
     LDR 0, 1, 6
     STR 0, 1, 4
-
 ; --- Find Closest Number ---
     LDR 0, 1, 4
     SMR 0, 1, 1
@@ -100,16 +98,13 @@ MAIN:
     STR 0, 1, 10
     LDR 0, 1, 1
     STR 0, 1, 5
-
     LDR 0, 1, 4
     SMR 0, 1, 2
     STR 0, 1, 7
     JSR 0, 0, PTR_AbsVal, 1
     LDR 0, 1, 6
     SMR 0, 1, 10
-
     JGE 0, 0, PTR_CHECK_N3, 1
-
     LDR 0, 1, 2
     STR 0, 1, 5
     LDR 0, 1, 4
@@ -118,7 +113,6 @@ MAIN:
     JSR 0, 0, PTR_AbsVal, 1
     LDR 0, 1, 6
     STR 0, 1, 10
-
 CHECK_N3:
     LDR 0, 1, 4
     SMR 0, 1, 3
@@ -127,47 +121,39 @@ CHECK_N3:
     LDR 0, 1, 6
     SMR 0, 1, 10
     JGE 0, 0, PTR_PRINT_RESULTS, 1
-
     LDR 0, 1, 3
     STR 0, 1, 5
-
 PRINT_RESULTS:
     LDR 0, 1, 4
     STR 0, 1, 7
     JSR 0, 0, PTR_PrintInt, 1
-
     LDR 0, 1, 5
     STR 0, 1, 7
     JSR 0, 0, PTR_PrintInt, 1
-
     HLT
 
 ; ================================================
-; SUBROUTINE: ReadInt (Corrected LOCs)
+; SUBROUTINE: ReadInt
 ; ================================================
 LOC 200
 ReadInt:
     LDR 0, 0, CONST_ZERO
-    STR 0, 1, 9      ; IS_NEG_FLAG = 0
-    STR 0, 1, 6      ; RESULT_NUM = 0
-
+    STR 0, 1, 9
+    STR 0, 1, 6
 LOC 203
 ReadLoop:
     IN 0, 0
     LDR 1, 0, CONST_10_NL
     TRR 0, 1
     JCC 3, 0, PTR_ReadEnd, 1
-
     LDR 1, 0, CONST_45
     TRR 0, 1
     JCC 3, 0, PTR_SetNegFlag, 1
-
     LDR 1, 0, CONST_48
     STR 0, 1, 8
     SMR 0, 0, CONST_48
     JGE 0, 0, PTR_CheckDigitHi, 1
     JMA 0, PTR_ReadLoop, 1
-
 LOC 215
 CheckDigitHi:
     LDA 1, 0, 9
@@ -175,37 +161,30 @@ CheckDigitHi:
     SMR 0, 1, 10
     JGE 0, 0, PTR_NotDigit, 1
     JMA 0, PTR_AddDigit, 1
-
 LOC 220
 NotDigit:
     JMA 0, PTR_ReadLoop, 1
-
 LOC 221
 AddDigit:
-    ; This is the corrected, 9-instruction logic
-    LDR 0, 1, 6          ; R0 = Current Num
-    LDR 2, 0, CONST_10   ; R2 = 10
-    MLT 0, 2             ; R0=high, R1=low(Num*10)
-    ; R1 now holds Num*10
-    LDR 0, 1, 8          ; R0 = new char
-    SMR 0, 0, CONST_48   ; R0 = new digit
-    STR 0, 1, 10         ; Store digit
-    AMR 1, 1, 10         ; R1 = (Num*10) + digit
-    STR 1, 1, 6          ; Save new num
-    JMA 0, PTR_ReadLoop, 1 ; Loop
-
+    LDR 0, 1, 6
+    LDR 2, 0, CONST_10
+    MLT 0, 2
+    LDR 0, 1, 8
+    SMR 0, 0, CONST_48
+    STR 0, 1, 10
+    AMR 1, 1, 10
+    STR 1, 1, 6
+    JMA 0, PTR_ReadLoop, 1
 LOC 230
 SetNegFlag:
     LDA 0, 0, 1
     STR 0, 1, 9
     JMA 0, PTR_ReadLoop, 1
-
 LOC 233
 ReadEnd:
     LDR 0, 1, 9
     JNE 0, 0, PTR_DoNegate, 1
     RFS 0
-
 LOC 236
 DoNegate:
     LDR 0, 0, CONST_ZERO
@@ -214,22 +193,61 @@ DoNegate:
     RFS 0
 
 ; ================================================
-; SUBROUTINE: PrintInt
+; SUBROUTINE: PrintInt (This is the final fix)
 ; ================================================
 LOC 300
 PrintInt:
-    LDR 0, 1, 7
-    JGE 0, 0, PTR_PUSH_LOOP_START, 1
+    ; Use GPR R2 as the Stack Pointer.
+    LDR 2, 0, PTR_STACK_BASE ; R2 = 1000
+    LDR 0, 1, 7              ; R0 = Num to print
+    JNE 0, 0, PTR_Print_Not_Zero, 1
+    LDR 0, 0, CONST_48
+    OUT 0, 1
+    JMA 0, PTR_Print_End, 1
 
+LOC 305
+Print_Not_Zero:
+    JGE 0, 0, PTR_Push_Loop, 1
     LDR 1, 0, CONST_45
     OUT 1, 1
-    LDR 0, 0, CONST_ZERO
-    SMR 0, 1, 7
-    STR 0, 1, 7
+    LDR 1, 0, CONST_ZERO
+    SMR 1, 0, 0
+    STR 1, 0, 0
 
-LOC 306
-PUSH_LOOP_START:
-    ; Skeleton - just prints newline
+LOC 313
+Push_Loop:
+    ; R2 is the stack pointer, so we must save it
+    STR 2, 0, PTR_TEMP_REG   ; Save R2 (Stack Ptr) in M[13]
+    LDR 2, 0, CONST_10     ; R2 = 10 (ry=2 is allowed)
+    DVD 0, 2               ; R0=Quotient, R1=Remainder
+    LDR 2, 0, PTR_TEMP_REG   ; Restore R2 (Stack Ptr)
+    AMR 1, 0, CONST_48     ; R1 = Remainder + '0' (ASCII)
+
+    ; PUSH: Store char and decrement R2
+    STR 2, 0, PTR_TEMP_REG ; Store R2 (stack ptr) in M[13]
+    LDX 3, PTR_TEMP_REG    ; Load R2's value into X3
+    STR 1, 3, 0            ; Store char at M[c(X3)]
+    SIR 2, 1               ; R2 = R2 - 1 (Decrement GPR)
+
+    JNE 0, 0, PTR_Push_Loop, 1 ; If R0 (Quotient) != 0, loop
+
+LOC 322
+Pop_Loop:
+    ; POP: Increment R2 and load char
+    AIR 2, 1               ; R2 = R2 + 1
+    STR 2, 0, PTR_TEMP_REG ; Store R2 (stack ptr) in M[13]
+    LDX 3, PTR_TEMP_REG    ; Load R2's value into X3
+    LDR 0, 3, 0            ; R0 = M[c(X3)]
+    OUT 0, 1               ; Print char
+
+    ; Check if stack is empty (c(R2) == 1000)
+    LDR 1, 0, PTR_STACK_BASE
+    TRR 1, 2                 ; Compare R1 (1000) and R2
+    JCC 3, 0, PTR_Print_End, 1 ; If R1 == R2, jump to end
+    JMA 0, PTR_Pop_Loop, 1   ; Else, loop
+
+LOC 332
+Print_End:
     LDA 1, 0, 10
     OUT 1, 1
     RFS 0
@@ -241,12 +259,10 @@ LOC 400
 AbsVal:
     LDR 0, 1, 7
     JGE 0, 0, PTR_AbsEnd, 1
-
     LDR 1, 0, CONST_ZERO
     SMR 1, 1, 7
     STR 1, 1, 6
     RFS 0
-
 LOC 406
 AbsEnd:
     STR 0, 1, 6
