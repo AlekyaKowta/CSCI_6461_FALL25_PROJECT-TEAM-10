@@ -1,406 +1,71 @@
-; =================================================================
-; Program 1 (Simplified for 3 Numbers) - CORRECTED
+; CSCI 6461 — Program 1 (starter): 3-number version, ISA-compliant within 0..31 address range
+; Goal: Find the closest of three signed 16-bit integers (N0,N1,N2) to QUERY.
+; Strict constraints:
+;  - No floating point.
+;  - Only integer opcodes from the ISA.
+;  - All labels/data placed so effective addresses stay within the assembler’s 5-bit Address field (0..31).
+;  - No assumptions about keyboard/ASCII yet.
 ;
-; Fixes the "Invalid Address Field" error by using
-; X1/X3 as data base registers and indirect jumps for subroutines.
-; =================================================================
+; Registers used (R0–R3):
+;   R0: current number (Ni)
+;   R1: current distance |Ni - QUERY|
+;   R2: best distance so far
+;   R3: best value so far
+;
+; Absolute value is implemented without NOT: if (Ni-QUERY) < 0 then compute (QUERY-Ni).
+; Compare uses: (bestdist - currentdist) >= 0 ? take new : keep old.
+;
+            LOC     0           ; keep everything inside addresses 0..31 to satisfy 5-bit Address field
 
-; --- Pointer and Base Address Table ---
-; This table MUST be in the accessible 0-31 range.
-        LOC     16              ; Start table at decimal 16
-Base_Data_500: Data 320         ; 500 octal = 320 decimal
-Base_Data_540: Data 352         ; 540 octal = 352 decimal
-Ptr_ReadInt:  Data ReadInt
-Ptr_PrintStr: Data PrintString
-Ptr_PrintInt: Data PrintInt
-Ptr_IncX1:    Data IncrementX1
-Ptr_DecX1:    Data DecrementX1
-Ptr_StackBase: Data StackBase   ; Pointer to the stack's base address
+; -------- Initialize with N0 --------
+START:      LDR     0,0,N0      ; R0 <- N0
+            LDR     1,0,N0      ; R1 <- N0
+            SMR     1,0,QUERY   ; R1 <- N0 - QUERY
+            JGE     1,0,ABS0_OK ; if >=0, R1 is already |N0-QUERY|
+            LDR     1,0,QUERY   ; else R1 <- QUERY
+            SMR     1,0,N0      ; R1 <- QUERY - N0  (now |N0-QUERY|)
+ABS0_OK:    LDR     3,0,N0      ; R3 <- best value = N0
+            LDR     2,0,R1MEM   ; R2 <- (garbage initially)
+            STR     1,0,R1MEM   ; R1MEM <- |N0-QUERY|
+            LDR     2,0,R1MEM   ; R2 <- bestdist = |N0-QUERY|
 
-; =================================================================
-; MAIN PROGRAM
-; =================================================================
-        LOC     100             ; Start code at 100 octal (64 decimal)
-Main:
-        ; --- Initialize Base Registers ---
-        LDX     1, 16           ; X1 <- c(16) = 320 (Data Base 1)
-        LDX     3, 17           ; X3 <- c(17) = 352 (Data Base 2)
+; -------- Consider N1 --------
+N1_STEP:    LDR     0,0,N1      ; R0 <- N1
+            LDR     1,0,N1      ; R1 <- N1
+            SMR     1,0,QUERY   ; R1 <- N1 - QUERY
+            JGE     1,0,ABS1_OK ; if >=0 keep
+            LDR     1,0,QUERY   ; R1 <- QUERY
+            SMR     1,0,N1      ; R1 <- QUERY - N1 (abs)
+ABS1_OK:    LDR     2,0,BESTDIST; R2 <- bestdist
+            SMR     2,0,R1MEM   ; R2 <- bestdist - (old R1MEM) [clear path]
+            LDR     2,0,BESTDIST; R2 <- bestdist
+            SMR     2,0,R1      ; R2 <- bestdist - |N1-QUERY|
+            JGE     2,0,TAKE_N1 ; if >=0, take N1
+            JMA     0,CONT_N2   ; else continue
+TAKE_N1:    STR     1,0,BESTDIST; bestdist <- |N1-QUERY|
+            STR     0,0,BEST    ; best <- N1
 
-; --- Task 1: Read 3 numbers into NumArray ---
-        LDR     1, 3, 3         ; R1 = Addr of Prompt1 (X3, offset 3)
-        JSR     0, 19, 1        ; Call PrintString (via pointer at loc 19)
+; -------- Consider N2 --------
+CONT_N2:    LDR     0,0,N2      ; R0 <- N2
+            LDR     1,0,N2      ; R1 <- N2
+            SMR     1,0,QUERY   ; R1 <- N2 - QUERY
+            JGE     1,0,ABS2_OK
+            LDR     1,0,QUERY   ; R1 <- QUERY
+            SMR     1,0,N2      ; R1 <- QUERY - N2
+ABS2_OK:    LDR     2,0,BESTDIST; R2 <- bestdist
+            SMR     2,0,R1      ; R2 <- bestdist - |N2-QUERY|
+            JGE     2,0,TAKE_N2 ; if >=0, take N2
+            JMA     0,DONE
+TAKE_N2:    STR     1,0,BESTDIST; bestdist <- |N2-QUERY|
+            STR     0,0,BEST    ; best <- N2
 
-        LDR     3, 1, 2         ; R3 = 3 (Loop counter) (X1, offset 2)
-        LDA     1, 1, 8         ; R1 = address of NumArray (Base+8)
-        STR     1, 1, 19        ; Store address in PtrTemp (X1, offset 19)
-        LDX     2, 19           ; Load X2 with address of NumArray (X1, 19)
-        ; Note: We use X2 as the array pointer now.
+DONE:       HLT                 ; results in BEST and BESTDIST
 
-ReadNumLoop:
-        JSR     0, 18, 1        ; Call ReadInt (result in R0)
-        STR     0, 2, 0         ; Store R0 into M[c(X2)]
-        LDR     0, 1, 1         ; R0 = 1
-        STR     0, 1, 16        ; TEMP = 1
-        STX     2, 20           ; X1Temp = c(X2)
-        LDR     0, 1, 20        ; R0 = c(X1Temp)
-        AMR     0, 1, 16        ; R0 = R0 + c(TEMP)
-        STR     0, 1, 20        ; X1Temp = R0
-        LDX     2, 20           ; X2 <- c(X1Temp). X2 incremented.
-        SOB     3, 0, ReadNumLoop ; R3--, loop if R3 > 0
-
-; --- Task 2: Read the search number ---
-        LDR     1, 3, 19        ; R1 = Address of Prompt2 (X3, offset 19)
-        JSR     0, 19, 1        ; Call PrintString
-        JSR     0, 18, 1        ; Read search number into R0
-        STR     0, 1, 11        ; Store in SearchNum (X1, offset 11)
-
-; --- Task 3: Find the closest number ---
-        LDR     3, 1, 2         ; R3 = 3 (Loop counter)
-        LDA     1, 1, 8         ; R1 = address of NumArray (X1, 8)
-        STR     1, 1, 19        ; Reset PtrTemp
-        LDX     2, 19           ; X2 = address of NumArray
-
-        LDR     0, 1, 4         ; R0 = 32767 (X1, 4)
-        STR     0, 1, 13        ; MinDiff = 32767 (X1, 13)
-
-SearchLoop:
-        ; 1. Get current number
-        LDR     0, 2, 0         ; R0 = NumArray[i] (using X2)
-        STR     0, 1, 14        ; Store in CurrentNum (X1, 14)
-
-        ; 2. Calculate diff = CurrentNum - SearchNum
-        LDR     1, 1, 11        ; R1 = SearchNum (X1, 11)
-        STR     1, 1, 16        ; TEMP = SearchNum
-        SMR     0, 1, 16        ; R0 = R0 - c(TEMP)
-
-        ; 3. Get abs(diff)
-        JGE     0, 0, Diff_IsPos
-        NOT     0
-        AIR     0, 1
-Diff_IsPos:
-        STR     0, 1, 15        ; Store abs(diff) in CurrentDiff (X1, 15)
-
-        ; 4. Check if abs(diff) < MinDiff
-        LDR     1, 1, 13        ; R1 = MinDiff (X1, 13)
-        STR     0, 1, 16        ; TEMP = CurrentDiff
-        SMR     1, 1, 16        ; R1 = MinDiff - abs(diff)
-        JGE     1, 0, NextIteration ; If R1 >= 0, skip update
-
-        ; 5. Update MinDiff and ClosestNum
-        LDR     0, 1, 15        ; R0 = new abs(diff)
-        STR     0, 1, 13        ; MinDiff = R0
-        LDR     0, 1, 14        ; R0 = CurrentNum
-        STR     0, 1, 12        ; ClosestNum = R0
-
-NextIteration:
-        LDR     0, 1, 1         ; R0 = 1
-        STR     0, 1, 16        ; TEMP = 1
-        STX     2, 20           ; X1Temp = c(X2)
-        LDR     0, 1, 20        ; R0 = c(X1Temp)
-        AMR     0, 1, 16        ; R0 = R0 + 1
-        STR     0, 1, 20        ; X1Temp = R0
-        LDX     2, 20           ; X2 <- c(X1Temp). X2 incremented.
-        SOB     3, 0, SearchLoop
-
-; --- Task 4: Print the results ---
-        LDR     1, 3, 31        ; R1 = Address of Result1 string (X3, 31)
-        JSR     0, 19, 1
-        LDR     0, 1, 11        ; R0 = SearchNum
-        JSR     0, 20, 1        ; Call PrintInt
-
-        LDR     1, 3, 44        ; R1 = Address of Result2 string (X3, 44)
-        JSR     0, 19, 1
-        LDR     0, 1, 12        ; R0 = ClosestNum
-        JSR     0, 20, 1        ; Call PrintInt
-
-        HLT
-
-; =================================================================
-; SUBROUTINE: ReadInt
-; =================================================================
-ReadInt:
-        STR     1, 1, 27        ; R1_Backup_RI (X1, 27)
-        STR     2, 1, 28        ; R2_Backup_RI (X1, 28)
-        STR     3, 1, 29        ; R3_Backup_RI (X1, 29)
-
-        LDR     0, 1, 0         ; R0 = 0 (Accumulator)
-        LDR     3, 1, 0         ; R3 = 0 (Negative flag)
-
-        IN      1, 0
-        LDR     2, 1, 6         ; R2 = MINUS_CHAR
-        TRR     1, 2
-        JCC     3, 0, ReadInt_IsNeg
-        JMA     0, 0, ReadInt_DigitLoop
-
-ReadInt_IsNeg:
-        LDR     3, 1, 1         ; Set negative flag (R3 = 1)
-        IN      1, 0
-
-ReadInt_DigitLoop:
-        LDR     2, 1, 7         ; R2 = Newline (10)
-        TRR     1, 2
-        JCC     3, 0, ReadInt_End
-
-        STR     1, 1, 17        ; Store char in DigitTemp
-        LDR     1, 1, 5         ; R1 = '0'
-        STR     1, 1, 16        ; TEMP = '0'
-        LDR     1, 1, 17        ; R1 = char
-        SMR     1, 1, 16        ; R1 = char - '0'
-        STR     1, 1, 17        ; Store digit in DigitTemp
-
-        STR     0, 1, 18        ; Save R0 (Accu)
-        LDR     2, 1, 3         ; R2 = 10
-        LDR     0, 1, 18        ; R0 = Accu
-        MLT     0, 2            ; R0:R1 = R0 * 10
-        STR     1, 1, 18        ; Store R1 (result) in AccuTemp
-
-        LDR     0, 1, 18
-        LDR     1, 1, 17
-        STR     1, 1, 16        ; TEMP = digit
-        AMR     0, 1, 16        ; R0 = R0 + c(TEMP)
-
-        IN      1, 0
-        JMA     0, 0, ReadInt_DigitLoop
-
-ReadInt_End:
-        LDR     1, 1, 0
-        TRR     3, 1            ; Test R3 == 0
-        JCC     3, 0, ReadInt_Return
-
-        NOT     0
-        AIR     0, 1
-
-ReadInt_Return:
-        LDR     1, 1, 27        ; Restore registers
-        LDR     2, 1, 28
-        LDR     3, 1, 29
-        RFS     0
-
-; =================================================================
-; SUBROUTINE: PrintString
-; =================================================================
-PrintString:
-        STR     0, 1, 23        ; R0_Backup_PS (X1, 23)
-        STR     3, 1, 24        ; R3_Backup_PS (X1, 24)
-
-        STR     1, 1, 25        ; Store R1 (address) in PtrTemp_PS
-        LDX     2, 25           ; Load X2 with the address
-
-PSLoop:
-        LDR     0, 2, 0         ; R0 = M[c(X2)] (current char)
-        JZ      0, 0, PSEnd
-        OUT     0, 1
-
-        ; Increment X2
-        LDR     3, 1, 1         ; R3 = 1
-        STR     3, 1, 16        ; TEMP = 1
-        STX     2, 20           ; X1Temp = c(X2)
-        LDR     3, 1, 20        ; R3 = c(X1Temp)
-        AMR     3, 1, 16        ; R3 = R3 + 1
-        STR     3, 1, 20        ; X1Temp = R3
-        LDX     2, 20           ; X2 <- c(X1Temp)
-
-        JMA     0, 0, PSLoop
-
-PSEnd:
-        LDR     0, 1, 23        ; Restore registers
-        LDR     3, 1, 24
-        RFS     0
-
-; =================================================================
-; SUBROUTINE: PrintInt
-; =================================================================
-PrintInt:
-        STR     1, 1, 30        ; R1_Backup_PI (X1, 30)
-        STR     2, 1, 31        ; R2_Backup_PI (X1, 31)
-        STR     3, 3, 0         ; R3_Backup_PI (X3, 0)
-
-        JGE     0, 0, PInt_Pos
-        LDR     1, 1, 6         ; R1 = MINUS_CHAR
-        OUT     1, 1
-        NOT     0
-        AIR     0, 1
-
-PInt_Pos:
-        LDR     2, 23, 0        ; R2 = Address of StackBase (from Ptr at loc 23)
-        STR     2, 3, 1         ; PtrTemp_PI = R2
-        LDX     2, 1            ; X2 = StackBase address (X3, 1)
-
-        LDR     3, 1, 3         ; R3 = 10 (Divisor)
-PInt_DivLoop:
-        ; Must use R0/R2 for DVD
-        STR     0, 1, 18        ; AccuTemp = R0 (Quotient)
-        STR     3, 1, 16        ; TEMP = 10
-        LDR     0, 1, 18
-        LDR     2, 1, 16
-        DVD     0, 2            ; R0=Quotient, R1=Remainder
-
-        STR     1, 1, 17        ; DigitTemp = R1 (Remainder)
-        LDR     1, 1, 5         ; R1 = '0'
-        AMR     1, 1, 17        ; R1 = '0' + Remainder
-
-        STR     1, 2, 0         ; Push char onto stack M[c(X2)]
-        JSR     0, 21, 1        ; X2++ (via Ptr_IncX1)
-
-        LDR     1, 1, 0
-        TRR     0, 1            ; Test if R0 (Quotient) == 0
-        JNE     0, 0, PInt_DivLoop
-
-PInt_PopLoop:
-        JSR     0, 22, 1        ; X2-- (via Ptr_DecX1)
-        LDR     0, 2, 0         ; R0 = M[c(X2)] (char from stack)
-        OUT     0, 1
-
-        STX     2, 1            ; X3Temp_PI = c(X2)
-        LDR     0, 3, 1         ; R0 = c(X2)
-        LDR     1, 23, 0        ; R1 = StackBase Address
-        STR     1, 1, 16        ; TEMP = R1
-        SMR     0, 1, 16        ; R0 = c(X2) - StackBase
-        JNE     0, 0, PInt_PopLoop
-
-        LDR     1, 1, 30        ; Restore registers
-        LDR     2, 1, 31
-        LDR     3, 3, 0
-        RFS     0
-
-; =================================================================
-; HELPER SUBROUTINES (X1 manipulation)
-; These helpers use X2, so the caller must be careful.
-; =================================================================
-IncrementX1:
-        STR     0, 1, 21        ; R0_Backup_IX (X1, 21)
-        STR     3, 1, 22        ; R3_Backup_IX (X1, 22)
-        STX     2, 20           ; X1Temp = c(X2)
-        LDR     0, 1, 20
-        AIR     0, 1
-        STR     0, 1, 20
-        LDX     2, 20
-        LDR     0, 1, 21
-        LDR     3, 1, 22
-        RFS     0
-
-DecrementX1:
-        STR     0, 1, 21
-        STR     3, 1, 22
-        STX     2, 20
-        LDR     0, 1, 20
-        SIR     0, 1
-        STR     0, 1, 20
-        LDX     2, 20
-        LDR     0, 1, 21
-        LDR     3, 1, 22
-        RFS     0
-
-; =================================================================
-; DATA AND CONSTANTS SECTION (Base 1)
-; =================================================================
-        LOC     500             ; Base 1: 500 octal = 320 decimal
-; --- Constants (Offsets 0-7) ---
-ZEROCONSTANT: Data 0            ; 320 (0)
-ONECONSTANT:  Data 1            ; 321 (1)
-THREE:        Data 3            ; 322 (2)
-TENCONSTANT:  Data 10           ; 323 (3)
-MAX_INT:      Data 32767        ; 324 (4)
-ASCII_ZERO:   Data 48           ; 325 (5)
-MINUS_CHAR:   Data 45           ; 326 (6)
-NL_CHAR:      Data 10           ; 327 (7)
-; --- Variables (Offsets 8-15) ---
-NumArray:     Data 0            ; 328 (8)
-              Data 0            ; 329 (9)
-              Data 0            ; 330 (10)
-SearchNum:    Data 0            ; 331 (11)
-ClosestNum:   Data 0            ; 332 (12)
-MinDiff:      Data 0            ; 333 (13)
-CurrentNum:   Data 0            ; 334 (14)
-CurrentDiff:  Data 0            ; 335 (15)
-; --- Temp storage (Offsets 16-31) ---
-TEMP:         Data 0            ; 336 (16)
-DigitTemp:    Data 0            ; 337 (17)
-AccuTemp:     Data 0            ; 338 (18)
-PtrTemp:      Data 0            ; 339 (19)
-X1Temp:       Data 0            ; 340 (20)
-R0_Backup_IX: Data 0            ; 341 (21)
-R3_Backup_IX: Data 0            ; 342 (22)
-R0_Backup_PS: Data 0            ; 343 (23)
-R3_Backup_PS: Data 0            ; 344 (24)
-PtrTemp_PS:   Data 0            ; 345 (25)
-R0_Backup_RI: Data 0            ; 346 (26)
-R1_Backup_RI: Data 0            ; 347 (27)
-R2_Backup_RI: Data 0            ; 348 (28)
-R3_Backup_RI: Data 0            ; 349 (29)
-R1_Backup_PI: Data 0            ; 350 (30)
-R2_Backup_PI: Data 0            ; 351 (31)
-
-; =================================================================
-; DATA AND CONSTANTS SECTION (Base 2)
-; =================================================================
-        LOC     540             ; Base 2: 540 octal = 352 decimal
-; --- Temp storage (Offsets 0-1) ---
-R3_Backup_PI: Data 0            ; 352 (0)
-PtrTemp_PI:   Data 0            ; 353 (1)
-X3Temp_PI:    Data 0            ; 354 (2)
-; --- Strings (Offsets 3-56) ---
-Prompt1:      Data 69           ; 355 (3)
-              Data 110
-              Data 116
-              Data 101
-              Data 114
-              Data 32
-              Data 51
-              Data 32
-              Data 35
-              Data 115
-              Data 58
-              Data 32
-              Data 10           ; 367 (15)
-              Data 0            ; 368 (16)
-Prompt2:      Data 69           ; 369 (17)
-              Data 110
-              Data 116
-              Data 101
-              Data 114
-              Data 32
-              Data 115
-              Data 101
-              Data 97
-              Data 114
-              Data 99
-              Data 104
-              Data 32
-              Data 35
-              Data 58
-              Data 32
-              Data 10           ; 385 (31)
-              Data 0
-Result1:      Data 89           ; 386 (32)
-              Data 111
-              Data 117
-              Data 32
-              Data 101
-              Data 110
-              Data 116
-              Data 101
-              Data 114
-              Data 101
-              Data 100
-              Data 58
-              Data 32           ; 398 (44)
-              Data 0
-Result2:      Data 10           ; 400 (46)
-              Data 67
-              Data 108
-              Data 111
-              Data 115
-              Data 101
-              Data 115
-              Data 116
-              Data 32
-              Data 105
-              Data 115
-              Data 58
-              Data 32           ; 412 (56)
-              Data 0
-
-; --- Stack for PrintInt ---
-        LOC     1000
-StackBase:    Data 0
+; -------- Data (kept compact to stay under address 32) --------
+N0:         Data    -12345      ; input #1 (edit as needed)
+N1:         Data     23456      ; input #2
+N2:         Data    -300        ; input #3
+QUERY:      Data     2000       ; query value
+BEST:       Data     0          ; output: closest value
+BESTDIST:   Data     0          ; output: |closest - QUERY|
+R1MEM:      Data     0          ; temp mirror for R1 when needed

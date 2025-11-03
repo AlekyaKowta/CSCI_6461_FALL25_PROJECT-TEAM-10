@@ -1,42 +1,447 @@
-; Echo multiple characters until ENTER (CR=13 or LF=10)
-; Correct branch form:  JZ r, x, address
-; Ensure loop jump targets the IN instruction exactly.
+; ============================================================================
+; C6461 — Program 1: Read 3 signed ints, echo them, read a target,
+;                    print the target and the closest of the 3.
+; Strict ISA compliance: Address ∈ [0..31], R∈{0..3}, IX∈{0..3}, explicit ",0".
+; Split into pages so all JSR/Jxx Address operands stay ≤31.
+; ============================================================================
 
-LOC 6
+; =============================== ENTRY (PC=0040) =============================
+        LOC     64
 
-MAIN:
-    JMA 0, SETUP, 0
+; Bootstrap: set data/code pages and jump to MAIN1
+        LDX     1, DBASE,0          ; IX1 = DATA page base (from low const)
+        LDX     3, MAIN1BASE,0      ; IX3 = MAIN1 page
+        JMA     3, 0,0              ; enter MAIN1 at offset 0
 
-SETUP:
-    ; Print prompt '>'  (62 = 31 + 31)
-    LDA 0, 0, 0
-    AIR 0, 31
-    AIR 0, 31
-    OUT 0, 1
+; ============================ LOW CONSTANTS (≤31) ============================
+        LOC     6                   ; all of these addresses are ≤31
+DBASE:      Data 512                ; DATA page base (IX1)
+MAIN1BASE:  Data 768                ; MAIN1 page
+MAIN2BASE:  Data 960                ; MAIN2 page
+MAIN3BASE:  Data 992                ; MAIN3 page
+READBASE:   Data 800                ; READ_INT page
+PRINTBASE:  Data 832                ; PRINT_INT page
+DIVBASE:    Data 864                ; DIV10 page
+MULBASE:    Data 896                ; MUL10 page
+FINDBASE:   Data 928                ; FIND page (compute min)
+PRESBASE:   Data 944                ; PRINT_RESULTS page
 
-READ_IN:                     ; ← place label on the IN line (PC should be 0013)
-    IN  0, 0                 ; read next char
+; ================================ MAIN1 (read 3) =============================
+        LOC     768                 ; MAIN1BASE
 
-    ; Check CR (13)
-    SIR 0, 13
-    JZ  0, 0, DONE
-    AIR 0, 13                ; restore R0
+; 0: read first
+        LDX     3, READBASE,0
+        JSR     3, 3, 0,0
+        LDX     3, MAIN1BASE,0
+        STR     0,1, 0,0            ; DATA[0]
 
-    ; Check LF (10)
-    SIR 0, 10
-    JZ  0, 0, DONE
-    AIR 0, 10                ; restore R0
+; 4: read second
+        LDX     3, READBASE,0
+        JSR     3, 3, 0,0
+        LDX     3, MAIN1BASE,0
+        STR     0,1, 1,0            ; DATA[1]
 
-    ; Not CR/LF → echo it
-    OUT 0, 1
-    JMA 0, 11, 0        ;  ; <-- 11 (decimal) = 0013 (octal). Jump back to READ_IN/IN.
+; 8: read third
+        LDX     3, READBASE,0
+        JSR     3, 3, 0,0
+        LDX     3, MAIN1BASE,0
+        STR     0,1, 2,0            ; DATA[2]
 
-DONE:
-    ; Newline and halt
-    LDA 0, 0, 0
-    AIR 0, 13
-    OUT 0, 1
-    LDA 0, 0, 0
-    AIR 0, 10
-    OUT 0, 1
-    HLT
+; 12: go to MAIN2 (echo three)
+        LDX     3, MAIN2BASE,0
+        JMA     3, 0,0
+
+; ================================ MAIN2 (echo) ===============================
+        LOC     960                 ; MAIN2BASE
+
+; echo DATA[0]
+; 0:
+        LDR     0,1, 0,0
+        LDX     3, PRINTBASE,0
+        JSR     3, 3, 0,0
+        LDX     3, MAIN2BASE,0
+        LDR     2,1, 20,0           ; '\n'
+        OUT     2,1
+
+; echo DATA[1]
+; 6:
+        LDR     0,1, 1,0
+        LDX     3, PRINTBASE,0
+        JSR     3, 3, 0,0
+        LDX     3, MAIN2BASE,0
+        LDR     2,1, 20,0
+        OUT     2,1
+
+; echo DATA[2]
+; 12:
+        LDR     0,1, 2,0
+        LDX     3, PRINTBASE,0
+        JSR     3, 3, 0,0
+        LDX     3, MAIN2BASE,0
+        LDR     2,1, 20,0
+        OUT     2,1
+
+; go to MAIN3 (read target)
+; 18:
+        LDX     3, MAIN3BASE,0
+        JMA     3, 0,0
+
+; ================================ MAIN3 (target) =============================
+        LOC     992                 ; MAIN3BASE
+
+; 0: read target into DATA[3]
+        LDX     3, READBASE,0
+        JSR     3, 3, 0,0
+        LDX     3, MAIN3BASE,0
+        STR     0,1, 3,0
+
+; jump to FIND (compute min of distances)
+; 4:
+        LDX     3, FINDBASE,0
+        JMA     3, 0,0
+
+; ================================ FIND (min) =================================
+        LOC     928                 ; FINDBASE
+
+; --- Compute |DATA[0]-DATA[3]| -> make it initial min and idx=1 ---
+; 0:
+        LDR     1,1, 0,0            ; r1 = num1
+        SMR     1,1, 3,0            ; r1 -= input
+        JGE     1,3, 5,0            ; if >=0 skip negate
+        NOT     1
+        AIR     1,1
+; 5:
+        STR     1,1, 7,0            ; D_MINVAL = |diff|
+        LDR     0,1, 21,0           ; D_ONE
+        STR     0,1, 8,0            ; D_MINIDX = 1
+
+; --- For num2: |DATA[1]-DATA[3]| then compare to min ---
+; 8:
+        LDR     1,1, 1,0
+        SMR     1,1, 3,0
+        JGE     1,3, 13,0
+        NOT     1
+        AIR     1,1
+; 13: r1 = |diff2|
+        SMR     1,1, 7,0            ; r1 - min
+        JGE     1,3, 18,0           ; if >=0 keep min
+        ; update min and idx=2
+        LDR     0,1, 1,0            ; reload |diff2|? (we have r1+min sub; recalc fast)
+        SMR     0,1, 3,0
+        JGE     0,3, 17,0
+        NOT     0
+        AIR     0,1
+; 17:
+        STR     0,1, 7,0            ; min = |diff2|
+        LDR     0,1, 22,0           ; D_TWO
+        STR     0,1, 8,0
+; 18:
+
+; --- For num3: |DATA[2]-DATA[3]| then compare to min ---
+; 19:
+        LDR     1,1, 2,0
+        SMR     1,1, 3,0
+        JGE     1,3, 24,0
+        NOT     1
+        AIR     1,1
+; 24: r1 = |diff3|
+        SMR     1,1, 7,0
+        JGE     1,3, 31,0
+        ; update min and idx=3
+        LDR     0,1, 2,0
+        SMR     0,1, 3,0
+        JGE     0,3, 29,0
+        NOT     0
+        AIR     0,1
+; 29:
+        STR     0,1, 7,0
+        LDR     0,1, 23,0           ; D_THREE
+        STR     0,1, 8,0
+; 31:
+        LDX     3, PRESBASE,0       ; jump to print results
+        JMA     3, 0,0
+
+; ============================ PRINT_RESULTS ==================================
+        LOC     944                 ; PRESBASE
+
+; print input (DATA[3]) + newline
+; 0:
+        LDR     0,1, 3,0
+        LDX     3, PRINTBASE,0
+        JSR     3, 3, 0,0
+        LDX     3, PRESBASE,0
+        LDR     2,1, 20,0
+        OUT     2,1
+
+; choose closest by DATA[8] and print + newline
+; 6:
+        LDR     1,1, 8,0            ; idx
+        SMR     1,1, 21,0           ; idx-1
+        JZ      1,3, 12,0           ; -> LOAD1
+        LDR     1,1, 8,0
+        SMR     1,1, 22,0           ; idx-2
+        JZ      1,3, 14,0           ; -> LOAD2
+; LOAD3 (fall-through)
+; 10:
+        LDR     0,1, 2,0
+        JMA     3, 16,0
+; 12: LOAD1
+        LDR     0,1, 0,0
+        JMA     3, 16,0
+; 14: LOAD2
+        LDR     0,1, 1,0
+; 16: PRINT SELECTED
+        LDX     3, PRINTBASE,0
+        JSR     3, 3, 0,0
+        LDX     3, PRESBASE,0
+        LDR     2,1, 20,0
+        OUT     2,1
+        HLT
+
+; ============================== READ_INT (page) ===============================
+; Reads signed integer: optional '-', then digits '0'..'9', ends on '\n'
+; R0: result, R1: sign (+1/-1), R2: ch/temp, R3: return
+        LOC     800                 ; READBASE
+
+; Keep all branch targets within 0..31 in this page.
+; 0: init
+        LDA     0,0, 0,0
+        LDA     1,0, 0,0
+        AIR     1,1                 ; sign=+1
+        LDA     2,0, 0,0
+        STR     2,1,12,0            ; started=0
+
+; 4: loop head (target ≤31)
+RI_L:   IN      2,0                 ; ch -> R2
+        STR     2,1,14,0            ; D_CHAR=ch
+
+        ; if not started, allow '-' or first digit
+        LDR     2,1,12,0
+        JNE     2,3, 10,0           ; -> HAVE
+        LDR     2,1,14,0
+        SMR     2,1, 19,0           ; ch - '-'
+        JZ      2,3, 8,0            ; -> NEG
+        LDR     2,1,14,0
+        SMR     2,1, 17,0           ; ch - '0'
+        JGE     2,3, 6,0            ; -> GE0
+        JMA     3, 4,0              ; -> loop
+; 6: GE0
+        LDR     2,1,14,0
+        SMR     2,1, 18,0           ; ch - '9'
+        JGE     2,3, 4,0            ; not digit → loop
+        ; first digit
+        LDA     2,0, 0,0
+        AIR     2,1
+        STR     2,1,12,0            ; started=1
+        LDR     0,1,14,0
+        SMR     0,0, 17,0           ; R0 = digit
+        JMA     3, 4,0              ; loop
+; 8: NEG
+        NOT     1
+        AIR     1,1                 ; sign=-1
+        LDA     2,0, 0,0
+        AIR     2,1
+        STR     2,1,12,0            ; started=1
+        JMA     3, 4,0              ; loop
+
+; 10: HAVE (digits or newline)
+        LDR     2,1,14,0
+        SMR     2,1, 20,0           ; ch - '\n'
+        JZ      2,3, 16,0           ; -> DONE
+
+        ; if digit: acc = acc*10 + digit
+        LDR     2,1,14,0
+        SMR     2,1, 17,0
+        JGE     2,3, 12,0
+        JMA     3, 4,0              ; not digit → loop
+; 12:
+        LDR     2,1,14,0
+        SMR     2,1, 18,0
+        JGE     2,3, 4,0            ; > '9' → loop
+        ; digit = ch - '0'
+        LDR     2,1,14,0
+        SMR     2,1, 17,0
+        ; R0 = R0*10
+        LDX     3, MULBASE,0
+        JSR     3, 3, 0,0
+        LDX     3, READBASE,0
+        ; add digit
+        STR     2,1, 9,0
+        AMR     0,1, 9,0
+        JMA     3, 4,0              ; loop
+
+; 16: DONE — apply sign if negative
+        LDA     2,0, 0,0
+        AIR     2,1                 ; 1
+        SMR     2,1,0               ; 1 - sign
+        JZ      2,3, 18,0
+        NOT     0
+        AIR     0,1
+; 18:
+        RFS     0
+
+; ============================== PRINT_INT (page) ==============================
+; Prints signed integer R0. Uses DATA[24] as SP, DATA[25..30] as 6-digit stack.
+        LOC     832                 ; PRINTBASE
+
+; 0: sign
+        JGE     0,3, 2,0
+        LDR     2,1, 19,0           ; '-'
+        OUT     2,1
+        NOT     0
+        AIR     0,1
+; 2: zero?
+        TRR     1,0
+        JNE     1,3, 5,0
+        LDR     2,1, 17,0           ; '0'
+        OUT     2,1
+        RFS     0
+
+; 5: SP=0
+        LDA     1,0, 0,0
+        STR     1,1,24,0
+
+; divide loop (targets kept ≤31)
+; 7:
+P_DIV:  LDX     3, DIVBASE,0
+        JSR     3, 3, 0,0           ; R0=q, R1=r
+        LDX     3, PRINTBASE,0
+        AMR     1,1, 17,0           ; r += '0'
+        ; push r into 25..30 by SP (unrolled 6)
+        LDR     2,1,24,0
+        JZ      2,3, 14,0
+        SIR     2,1
+        JZ      2,3, 15,0
+        SIR     2,1
+        JZ      2,3, 16,0
+        SIR     2,1
+        JZ      2,3, 17,0
+        SIR     2,1
+        JZ      2,3, 18,0
+        STR     1,1,30,0
+        JMA     3, 19,0
+; 14..18:
+        STR     1,1,25,0            ; [14]
+        JMA     3, 19,0
+        STR     1,1,26,0            ; [15]
+        JMA     3, 19,0
+        STR     1,1,27,0            ; [16]
+        JMA     3, 19,0
+        STR     1,1,28,0            ; [17]
+        JMA     3, 19,0
+        STR     1,1,29,0            ; [18]
+; 19: SP++
+        LDR     2,1,24,0
+        AIR     2,1
+        STR     2,1,24,0
+        JNE     0,3, 7,0            ; if q!=0 keep dividing
+
+; pop & print
+; 22:
+P_POP:  LDR     2,1,24,0
+        JZ      2,3, 31,0           ; done
+        SIR     2,1
+        STR     2,1,24,0
+        JZ      2,3, 26,0
+        SIR     2,1
+        JZ      2,3, 27,0
+        SIR     2,1
+        JZ      2,3, 28,0
+        SIR     2,1
+        JZ      2,3, 29,0
+        SIR     2,1
+        JZ      2,3, 30,0
+        LDR     1,1,30,0
+        OUT     1,1
+        JMA     3, 22,0
+; 26..30:
+        LDR     1,1,25,0            ; [26]
+        OUT     1,1
+        JMA     3, 22,0
+        LDR     1,1,26,0            ; [27]
+        OUT     1,1
+        JMA     3, 22,0
+        LDR     1,1,27,0            ; [28]
+        OUT     1,1
+        JMA     3, 22,0
+        LDR     1,1,28,0            ; [29]
+        OUT     1,1
+        JMA     3, 22,0
+        LDR     1,1,29,0            ; [30]
+        OUT     1,1
+        JMA     3, 22,0
+; 31:
+        RFS     0
+
+; =============================== DIV10 (page) =================================
+; Input: R0=n (≥0). Output: R0=q, R1=r where n = 10*q + r.
+        LOC     864                 ; DIVBASE
+
+; 0:
+        TRR     1,0                 ; r = n
+        LDA     0,0, 0,0            ; q = 0
+; 2:
+DLP:    LDR     2,1, 16,0           ; R2 = 10 (DATA[16])
+        SMR     1,1, 16,0           ; r -= 10
+        JGE     1,3, 6,0
+        AIR     1,10                ; undo last subtract
+        RFS     0
+; 6:
+        AIR     0,1                 ; q++
+        JMA     3, 2,0
+
+; =============================== MUL10 (page) =================================
+; R0 = R0*10 (via addition)
+        LOC     896                 ; MULBASE
+
+; 0:
+        STR     0,1, 9,0            ; save orig in DATA[9]
+        LDA     0,0, 0,0
+        LDR     1,1, 16,0           ; count=10
+; 4:
+MLP:    AMR     0,1, 9,0
+        SIR     1,1
+        JZ      1,3, 7,0
+        JMA     3, 4,0
+; 7:
+        RFS     0
+
+; ================================= DATA PAGE ==================================
+        LOC     512                 ; DBASE (IX1)
+
+; Variables
+; 0..2: three numbers; 3: input; 7: min value; 8: index (1..3)
+D_NUM1:     Data 0                  ; [0]
+D_NUM2:     Data 0                  ; [1]
+D_NUM3:     Data 0                  ; [2]
+D_INPUT:    Data 0                  ; [3]
+D_ABS1:     Data 0                  ; [4] (unused in final, kept spare)
+D_ABS2:     Data 0                  ; [5]
+D_ABS3:     Data 0                  ; [6]
+D_MINVAL:   Data 0                  ; [7]
+D_MINIDX:   Data 0                  ; [8]
+
+; Temps / helpers
+D_TMPA:     Data 0                  ; [9]
+D_TMPB:     Data 0                  ; [10]
+D_TMPC:     Data 0                  ; [11]
+D_STARTED:  Data 0                  ; [12]
+D_SIGN:     Data 0                  ; [13]
+D_CHAR:     Data 0                  ; [14]
+D_ZERO:     Data 0                  ; [15]
+D_TEN:      Data 10                 ; [16]
+D_CHR0:     Data 48                 ; [17] '0'
+D_CHR9:     Data 57                 ; [18] '9'
+D_CHRM:     Data 45                 ; [19] '-'
+D_CHRN:     Data 10                 ; [20] '\n'
+D_ONE:      Data 1                  ; [21]
+D_TWO:      Data 2                  ; [22]
+D_THREE:    Data 3                  ; [23]
+D_SP:       Data 0                  ; [24] stack pointer for print
+STK0:       Data 0                  ; [25]
+STK1:       Data 0                  ; [26]
+STK2:       Data 0                  ; [27]
+STK3:       Data 0                  ; [28]
+STK4:       Data 0                  ; [29]
+STK5:       Data 0                  ; [30]
+RES31:      Data 0                  ; [31]
