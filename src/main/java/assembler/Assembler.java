@@ -2,10 +2,7 @@ package src.main.java.assembler;
 
 import javax.swing.*;
 import java.io.*;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Arrays;
-import java.util.Map;
+import java.util.*;
 import java.util.function.BiConsumer;
 
 public class Assembler {
@@ -201,11 +198,15 @@ public class Assembler {
 
             case "JMA":
                 idx = parseAndValidateIX(operands[0]);
-                address = parseAndValidateAddress(operands[1], false);
+                address = parseAndValidateAddress(operands[1], false);  // must return 0..31
                 indirect = (operands.length > 2) ? Integer.parseInt(operands[2]) : 0;
-                // Note: (reg << 8) is omitted, setting bits 9-8 to 00.
+                if (indirect != 0 && indirect != 1) {
+                    throw new IllegalArgumentException("Indirect bit (I) must be 0 or 1 for JMA.");
+                }
+
+                // Bits 9–8 (R field) are 00 for JMA
                 return String.format("%06o\t%06o", currentAddress,
-                        (opcode << 10) | (idx << 6) | (indirect << 5) | address);
+                        (opcode << 10) | (idx << 6) | (indirect << 5) | (address & 0x1F));
 
             // Instructions with format: opcode x,address[,i]
             case "LDX":
@@ -297,52 +298,97 @@ public class Assembler {
     //     return cleanLines;
     // }
 
+// In Assembler.java
     public ArrayList<String> firstPassWithComments(String inputFile, ArrayList<String> originalLines) throws IOException {
         BufferedReader reader = new BufferedReader(new FileReader(inputFile));
         ArrayList<String> cleanLines = new ArrayList<>();
         String row;
 
         while ((row = reader.readLine()) != null) {
-            originalLines.add(row);  // preserve comment lines
-            String clean = row;
-            int commentIndex = row.indexOf(';');
-            if (commentIndex != -1) {
-                clean = row.substring(0, commentIndex).trim();
-            } else {
-                clean = row.trim();
-            }
-            if (!clean.isEmpty()) {
-                cleanLines.add(clean);
-            }
+            originalLines.add(row);
+            int semi = row.indexOf(';');
+            String clean = (semi >= 0 ? row.substring(0, semi) : row).trim();
+            if (!clean.isEmpty()) cleanLines.add(clean);
         }
         reader.close();
 
-        currentAddress = 0; // Reset for Pass 1 Symbol Table build
-        // Delete reserved code
-        // boolean isFirstExecutableInstruction = true; // Flag to track first instruction
+        // Opcodes/pseudo-ops that allocate exactly one 16-bit word
+        final Set<String> oneWordOps = new HashSet<>(Arrays.asList(
+                // Misc
+                "HLT","TRAP",
+                // Load/Store
+                "LDR","STR","LDA","LDX","STX",
+                // Transfer
+                "JZ","JNE","JCC","JMA","JSR","RFS","SOB","JGE",
+                // Arithmetic/Logical (memory/immediate)
+                "AMR","SMR","AIR","SIR",
+                // Register-to-register & mult/div/logical
+                "MLT","DVD","TRR","AND","ORR","NOT",
+                // Shift/Rotate
+                "SRC","RRC",
+                // I/O
+                "IN","OUT","CHK",
+                // Floating/vector (if you implement them now)
+                "FADD","FSUB","VADD","VSUB","CNVRT","LDFR","STFR"
+        ));
 
-for (String line : cleanLines) {
-    if (line.startsWith("LOC")) {
-        currentAddress = Integer.parseInt(line.substring(3).trim());
-        continue;
-    }
+        currentAddress = 0;
 
-    int colon = line.indexOf(':');
-    String body = line;
-    if (colon != -1) {
-        String label = line.substring(0, colon).trim();
-        symbolsMap.put(label, currentAddress);
-        body = line.substring(colon + 1).trim(); // what's after the label
-    }
+        for (String line : cleanLines) {
+            String s = line.trim();
 
-    // Only advance address if there's an actual instruction/directive after the label
-    if (!body.isEmpty()) {
-        currentAddress++;
-    }
-}
+            // Handle "LOC n" anywhere on the line (with or without label)
+            // Split label (if present)
+            int colon = s.indexOf(':');
+            String label = null;
+            String body = s;
+            if (colon >= 0) {
+                label = s.substring(0, colon).trim();
+                body  = s.substring(colon + 1).trim();
+                // Duplicate label guard
+                if (symbolsMap.containsKey(label)) {
+                    throw new IllegalArgumentException("Duplicate label: " + label);
+                }
+                symbolsMap.put(label, currentAddress);
+            }
+
+            if (body.isEmpty()) continue;
+
+            // Tokenize body to identify directive/opcode
+            String[] toks = body.split("\\s+|\\t+|,\\s*");
+            if (toks.length == 0) continue;
+
+            String head = toks[0].toUpperCase(Locale.ROOT);
+
+            // LOC does NOT allocate memory
+            if ("LOC".equals(head)) {
+                if (toks.length < 2) {
+                    throw new IllegalArgumentException("LOC requires a decimal address.");
+                }
+                int loc = Integer.parseInt(toks[1]); // ISA: decimal in source
+                currentAddress = loc;
+                continue;
+            }
+
+            // DATA allocates exactly one word
+            if ("DATA".equals(head)) {
+                currentAddress += 1;
+                continue;
+            }
+
+            // Known opcodes allocate one word
+            if (oneWordOps.contains(head)) {
+                currentAddress += 1;
+                continue;
+            }
+
+            // Anything else is an error in pass 1 (prevents phantom increments)
+            throw new IllegalArgumentException("Unknown opcode/directive in pass 1: " + head);
+        }
+
         return cleanLines;
-
     }
+
 
     /// <summary>
     /// Injects the address of the first executable instruction into M[5].

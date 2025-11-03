@@ -395,7 +395,7 @@ public class MachineController {
 
         // Indirect Addressing: I=1. EA <- C(EA)
         if (i == 1) {
-            EA = state.getMemory(EA);
+            EA = state.getMemory(EA) & MASK_12_BIT;
         }
         
         if (EA <= 5) {
