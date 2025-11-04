@@ -234,7 +234,7 @@ public class MachineController {
         // Note: Shift/Rotate format is OpCode (6), R (2), A/L (1), L/R (1), Unused (4), Count (4)
         // Decoding needs to use correct bits based on Table 9 format
         // The R field is bits 10-11, A/L is bit 8, L/R is bit 9, Count is bits 0-3.
-        int sr_r = (instruction >> 10) & R_MASK;
+        int sr_r = (instruction >> 8) & R_MASK;
         int al = (instruction >> 7) & 0b1;
         int lr = (instruction >> 6) & 0b1;
         int count = instruction & COUNT_MASK;
@@ -358,7 +358,7 @@ public class MachineController {
                         }
                     });
                     // Add sleep outside the EDT loop
-                    Thread.sleep(100);
+                   // Thread.sleep(100);
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();

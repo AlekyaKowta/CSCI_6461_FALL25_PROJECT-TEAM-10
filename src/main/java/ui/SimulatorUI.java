@@ -27,6 +27,9 @@ import java.io.IOException;
  */
 public class SimulatorUI extends JFrame {
 
+    // Headless mode flag: when true, skip building/showing the Swing frame and no-op UI updates
+    private final boolean headless;
+
     // --- Custom Colors and Constants ---
     private static final Color LIGHT_BLUE = new Color(220, 230, 255); // Pale, light blue for background
     private static final Color DARK_CONTROL_BLUE = new Color(50, 100, 150); // Darker blue for buttons
@@ -65,14 +68,30 @@ public class SimulatorUI extends JFrame {
 
     private MachineController controller;
 
-    // Constructor
+    // Constructor (normal GUI)
     public SimulatorUI() {
+        this(false);
+    }
+
+    // Constructor (headless/test mode)
+    public SimulatorUI(boolean headless) {
+        this.headless = headless;
+
         // Initialize MachineState and MachineController, passing 'this' (the UI)
         MachineState state = new MachineState();
         this.controller = new MachineController(state, this);
-        initializeUI();
-        addInputListeners();
-        updateDisplays(); // Initial display update
+
+        if (!headless) {
+            initializeUI();
+            addInputListeners();
+            updateDisplays(); // Initial display update
+        } else {
+            // Minimal components to satisfy controller interactions in tests
+            this.printerArea = new JTextArea();
+            this.consoleInputField = new JTextField();
+            this.octalInputField = new JTextField("000000", 6);
+            this.binaryInputField = new JTextField("0000000000000000", 20);
+        }
     }
 
     private void initializeUI() {
@@ -449,6 +468,11 @@ public class SimulatorUI extends JFrame {
         return consoleInputField;
     }
 
+    // Expose controller for headless/testing harnesses
+    public MachineController getController() {
+        return controller;
+    }
+
     // Public getter for the Octal Input field (needed by MachineController for manual loads)
     public JTextField getOctalInputField() {
         return octalInputField;
@@ -463,6 +487,7 @@ public class SimulatorUI extends JFrame {
      * Updates all register and memory displays from the MachineState.
      */
     public void updateDisplays() {
+        if (headless) return; // No-op in headless mode
         MachineState state = controller.getMachineState();
 
         // PC and MAR are 12-bit, displayed as %04o (4 octal digits)
@@ -519,6 +544,7 @@ public class SimulatorUI extends JFrame {
     }
 
     public void setStepRunButtonsEnabled(boolean enabled) {
+        if (headless) return; // No-op in headless mode
         singleStepButton.setEnabled(enabled);
         runButton.setEnabled(enabled);
     }
