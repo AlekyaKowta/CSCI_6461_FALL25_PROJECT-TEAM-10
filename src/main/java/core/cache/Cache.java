@@ -16,6 +16,12 @@ public class Cache {
     private int fifoPointer;
     private MachineState machineState; // Reference to main memory
 
+    public enum AccessKind { READ_HIT, READ_MISS, WRITE_HIT, WRITE_MISS, NONE }
+
+    private int lastAccessIndex = -1;
+    private AccessKind lastAccessKind = AccessKind.NONE;
+
+
     /**
      * Inner class representing a single cache line.
      */
@@ -44,12 +50,20 @@ public class Cache {
      * Clears the cache by invalidating all lines.
      * This is called by MachineState.initialize() during a machine reset.
      */
+//    public void initialize() {
+//        for (int i = 0; i < CACHE_SIZE; i++) {
+//            lines[i].valid = false;
+//        }
+//        this.fifoPointer = 0;
+//    }
+
     public void initialize() {
-        for (int i = 0; i < CACHE_SIZE; i++) {
-            lines[i].valid = false;
-        }
+        for (int i = 0; i < CACHE_SIZE; i++) lines[i].valid = false;
         this.fifoPointer = 0;
+        this.lastAccessIndex = -1;
+        this.lastAccessKind = AccessKind.NONE;
     }
+
 
     /**
      * Finds the index of a cache line matching the address.
@@ -70,15 +84,16 @@ public class Cache {
      * @param address The address (tag) to load.
      * @param data The 16-bit data from memory.
      */
-    private void loadLine(int address, int data) {
-        CacheLine lineToReplace = lines[fifoPointer];
+    private int loadLine(int address, int data) {
+        int replacedIndex = fifoPointer;               // index being written
+        CacheLine lineToReplace = lines[replacedIndex];
         lineToReplace.valid = true;
         lineToReplace.tag = address;
         lineToReplace.data = data;
-
-        // Advance the FIFO pointer for the next replacement
-        fifoPointer = (fifoPointer + 1) % CACHE_SIZE;
+        fifoPointer = (fifoPointer + 1) % CACHE_SIZE;  // advance for next time
+        return replacedIndex;
     }
+
 
     /**
      * Reads a word from memory, using the cache.
@@ -86,17 +101,15 @@ public class Cache {
      */
     public int readWord(int address) {
         int lineIndex = findLine(address);
-
         if (lineIndex != -1) {
-            // --- Cache Hit ---
+            lastAccessIndex = lineIndex;
+            lastAccessKind  = AccessKind.READ_HIT;
             return lines[lineIndex].data;
         } else {
-            // --- Cache Miss ---
-            // 1. Fetch from main memory
             int data = machineState.getMemoryDirect(address);
-            // 2. Load into cache
-            loadLine(address, data);
-            // 3. Return the data
+            int idx  = loadLine(address, data);
+            lastAccessIndex = idx;
+            lastAccessKind  = AccessKind.READ_MISS;
             return data;
         }
     }
@@ -106,21 +119,19 @@ public class Cache {
      * This is called by MachineState.setMemory().
      */
     public void writeWord(int address, int value) {
-        // 1. Write-Through: Always write to main memory
-        machineState.setMemoryDirect(address, value);
-
+        machineState.setMemoryDirect(address, value); // write-through
         int lineIndex = findLine(address);
-
         if (lineIndex != -1) {
-            // --- Cache Hit ---
-            // Update the data in the cache line
             lines[lineIndex].data = value;
+            lastAccessIndex = lineIndex;
+            lastAccessKind  = AccessKind.WRITE_HIT;
         } else {
-            // --- Cache Miss (Write-Allocate) ---
-            // Load this new address/value pair into the cache
-            loadLine(address, value);
+            int idx = loadLine(address, value); // write-allocate
+            lastAccessIndex = idx;
+            lastAccessKind  = AccessKind.WRITE_MISS;
         }
     }
+
 
     /**
      * Generates a string representation of the cache state for display in the UI.
@@ -143,4 +154,37 @@ public class Cache {
         }
         return sb.toString();
     }
+
+    public static final class SnapshotLine {
+        public final boolean valid;
+        public final int tag;
+        public final int data;
+        public SnapshotLine(boolean valid, int tag, int data) {
+            this.valid = valid; this.tag = tag; this.data = data;
+        }
+    }
+
+    public static final class Snapshot {
+        public final int fifoPointer;
+        public final SnapshotLine[] lines;
+        public final int lastAccessIndex;
+        public final Cache.AccessKind lastAccessKind;
+        public Snapshot(int fifoPointer, SnapshotLine[] lines, int lastAccessIndex, Cache.AccessKind kind) {
+            this.fifoPointer = fifoPointer;
+            this.lines = lines;
+            this.lastAccessIndex = lastAccessIndex;
+            this.lastAccessKind = kind;
+        }
+    }
+
+    public Snapshot snapshot() {
+        SnapshotLine[] snap = new SnapshotLine[CACHE_SIZE];
+        for (int i = 0; i < CACHE_SIZE; i++) {
+            CacheLine cl = lines[i];
+            snap[i] = new SnapshotLine(cl.valid, cl.tag, cl.data);
+        }
+        return new Snapshot(fifoPointer, snap, lastAccessIndex, lastAccessKind);
+    }
 }
+
+

@@ -63,7 +63,8 @@ public class SimulatorUI extends JFrame {
     private JButton trapButton;
 
     // --- Output Areas ---
-    private JTextArea cacheContentArea, printerArea;
+    private javax.swing.JTextPane cacheContentArea;
+    private JTextArea printerArea;
     private JTextField consoleInputField;
 
     private JTextField outputField;
@@ -440,16 +441,20 @@ public class SimulatorUI extends JFrame {
         JPanel p = new JPanel();
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
         p.setBackground(LIGHT_BLUE);
-        p.setBorder(BorderFactory.createTitledBorder("Console Output/Input"));
+        p.setBorder(BorderFactory.createTitledBorder("Cache Area Content"));
 
         // Cache Content Area
-        cacheContentArea = new JTextArea(8, 30);
+        cacheContentArea = new javax.swing.JTextPane();
         cacheContentArea.setEditable(false);
-        cacheContentArea.setBorder(BorderFactory.createTitledBorder("Cache Content"));
-        p.add(new JScrollPane(cacheContentArea));
+        cacheContentArea.setBorder(BorderFactory.createTitledBorder("Cache Lines"));
+        cacheContentArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        JScrollPane cacheScroll = new JScrollPane(cacheContentArea);
+        // make it a bit taller & narrower
+        cacheScroll.setPreferredSize(new Dimension(260, 220));
+        p.add(cacheScroll);
 
         // Console Printer Area
-        printerArea = new JTextArea(10, 30);
+        printerArea = new JTextArea(8, 24);
         printerArea.setEditable(false);
         printerArea.setBorder(BorderFactory.createTitledBorder("Printer"));
         p.add(new JScrollPane(printerArea));
@@ -458,14 +463,14 @@ public class SimulatorUI extends JFrame {
         ioRow.setBackground(LIGHT_BLUE);
 
         // Console Input Field
-        consoleInputField = new JTextField(30);
+        consoleInputField = new JTextField(20);
         JPanel inputWrap = new JPanel(new BorderLayout(5, 5));
         inputWrap.setBackground(LIGHT_BLUE);
         inputWrap.setBorder(BorderFactory.createTitledBorder("Console Input"));
         inputWrap.add(consoleInputField, BorderLayout.CENTER);
 
         // Console Output Field
-        outputField = new JTextField(30);
+        outputField = new JTextField(20);
         outputField.setEditable(false);
         JPanel outputWrap = new JPanel(new BorderLayout(5, 5));
         outputWrap.setBackground(LIGHT_BLUE);
@@ -552,7 +557,67 @@ public class SimulatorUI extends JFrame {
         binaryInputField.setText(String.format("%16s", Integer.toBinaryString(octalValue)).replace(' ', '0'));
 
         cacheContentArea.setText(state.getCache().getCacheStateString());
+        renderCacheStyled();
     }
+
+    private void renderCacheStyled() {
+        var snap = controller.getMachineState().getCache().snapshot();
+        javax.swing.text.StyledDocument doc = new javax.swing.text.DefaultStyledDocument();
+        javax.swing.text.StyleContext sc = new javax.swing.text.StyleContext();
+
+        // Base style
+        javax.swing.text.Style base = sc.addStyle("base", null);
+        javax.swing.text.StyleConstants.setFontFamily(base, Font.MONOSPACED);
+        javax.swing.text.StyleConstants.setFontSize(base, 12);
+
+        // Header style (bold)
+        javax.swing.text.Style hdr = sc.addStyle("hdr", base);
+        javax.swing.text.StyleConstants.setBold(hdr, true);
+
+        // Normal line
+        javax.swing.text.Style normal = sc.addStyle("normal", base);
+
+        // Hit = green background
+        javax.swing.text.Style hit = sc.addStyle("hit", base);
+        javax.swing.text.StyleConstants.setBackground(hit, new Color(205, 240, 205)); // soft green
+
+        // Miss = red background
+        javax.swing.text.Style miss = sc.addStyle("miss", base);
+        javax.swing.text.StyleConstants.setBackground(miss, new Color(255, 215, 215)); // soft red
+
+        // FIFO pointer line highlight (optional, subtle)
+        javax.swing.text.Style fifo = sc.addStyle("fifo", base);
+        javax.swing.text.StyleConstants.setItalic(fifo, true);
+
+        try {
+            doc.insertString(doc.getLength(), String.format("FIFO Ptr -> %02d\n", snap.fifoPointer), fifo);
+            doc.insertString(doc.getLength(), "LN | V | Tag(Oct) | Data(Oct)\n", hdr);
+            doc.insertString(doc.getLength(), "---|---|----------|----------\n", hdr);
+
+            for (int i = 0; i < snap.lines.length; i++) {
+                var line = snap.lines[i];
+                String tag  = line.valid ? String.format("%04o", line.tag)  : "----";
+                String data = line.valid ? String.format("%06o", line.data) : "------";
+                String row  = String.format("%02d | %d | %s | %s\n",
+                        i, (line.valid ? 1 : 0), tag, data);
+
+                javax.swing.text.Style use = normal;
+                if (i == snap.lastAccessIndex) {
+                    switch (snap.lastAccessKind) {
+                        case READ_HIT:
+                        case WRITE_HIT:  use = hit;  break;
+                        case READ_MISS:
+                        case WRITE_MISS: use = miss; break;
+                        default: use = normal;
+                    }
+                }
+                doc.insertString(doc.getLength(), row, use);
+            }
+        } catch (javax.swing.text.BadLocationException ignore) {}
+
+        cacheContentArea.setDocument(doc);
+    }
+
 
     // --- IPL Button Action Handlers ---
 
