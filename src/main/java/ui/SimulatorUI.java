@@ -69,6 +69,9 @@ public class SimulatorUI extends JFrame {
 
     private JTextField outputField;
 
+    private JLabel cacheHitsLbl, cacheMissesLbl, cacheReadLbl, cacheWriteLbl;
+
+
     private MachineController controller;
 
     // Constructor (normal GUI)
@@ -453,6 +456,23 @@ public class SimulatorUI extends JFrame {
         cacheScroll.setPreferredSize(new Dimension(260, 220));
         p.add(cacheScroll);
 
+        // Cache Stats Row (hits/misses)
+        JPanel stats = new JPanel(new GridLayout(2, 2, 6, 2));
+        stats.setBackground(Color.WHITE);
+        stats.setBorder(BorderFactory.createTitledBorder("Cache Stats"));
+
+        cacheHitsLbl   = new JLabel("Hits: 0");
+        cacheMissesLbl = new JLabel("Misses: 0");
+        cacheReadLbl   = new JLabel("R  H/M: 0 / 0");
+        cacheWriteLbl  = new JLabel("W  H/M: 0 / 0");
+
+        stats.add(cacheHitsLbl);
+        stats.add(cacheMissesLbl);
+        stats.add(cacheReadLbl);
+        stats.add(cacheWriteLbl);
+
+        p.add(stats);
+
         // Console Printer Area
         printerArea = new JTextArea(8, 24);
         printerArea.setEditable(false);
@@ -557,6 +577,12 @@ public class SimulatorUI extends JFrame {
         binaryInputField.setText(String.format("%16s", Integer.toBinaryString(octalValue)).replace(' ', '0'));
 
         cacheContentArea.setText(state.getCache().getCacheStateString());
+        var c = state.getCache();
+        cacheHitsLbl.setText("Hits: "   + c.getTotalHits());
+        cacheMissesLbl.setText("Misses: " + c.getTotalMisses());
+        cacheReadLbl.setText("R  H/M: " + c.getReadHits()  + " / " + c.getReadMisses());
+        cacheWriteLbl.setText("W  H/M: " + c.getWriteHits() + " / " + c.getWriteMisses());
+
         renderCacheStyled();
     }
 

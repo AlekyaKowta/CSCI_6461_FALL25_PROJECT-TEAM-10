@@ -147,32 +147,6 @@ public class MachineController {
             }
         }
 
-        // Delete Reserved Memory Code
-        // Set Entry Point ---
-        // 1. Check Reserved Location 5 (ESAR) for the TRUE execution start address.
-        // M[5] will hold the address of the first instruction (e.g., 000016) if the assembler set it.
-//        int executionStartPC = state.getMemory(5);
-//
-//        if (executionStartPC != 0) {
-//            // Option A: Assembler set M[5]. This is the desired execution start.
-//            executionStartPC &= MASK_12_BIT;
-//            state.setPC(executionStartPC);
-//            state.setMAR(executionStartPC);
-//            ui.getPrinterArea().append("IPL successful. Loaded " + linesRead + " instructions.\n");
-//        } else if (firstAddress != -1) {
-//            // Option B: Fallback. M[5] is 0. Use the very first address loaded (e.g., 0006).
-//            // This is primarily for visualization/debugging, acknowledging that execution may fail (hit HLT).
-//            firstAddress &= MASK_12_BIT;
-//            state.setPC(firstAddress);
-//            state.setMAR(firstAddress);
-//            ui.getPrinterArea().append("IPL warning: M[5] not set. PC set to first loaded location: " + String.format("%04o", firstAddress) + ". Execution may start at data.\n");
-//        } else {
-//            // No program loaded
-//            ui.getPrinterArea().append("IPL warning: Load file was empty. PC remains 0.\n");
-//        }
-
-        // Set Entry Point (Option: Always use the first loaded address) ---
-
         if (firstAddress != -1) {
             // PC is set to the first address loaded and masked to 12 bits.
             firstAddress &= MASK_12_BIT;
@@ -233,8 +207,6 @@ public class MachineController {
 
         // Fields specific to Shift/Rotate (SRC/RRC)
         // Note: Shift/Rotate format is OpCode (6), R (2), A/L (1), L/R (1), Unused (4), Count (4)
-        // Decoding needs to use correct bits based on Table 9 format
-        // The R field is bits 10-11, A/L is bit 8, L/R is bit 9, Count is bits 0-3.
         int sr_r = (instruction >> 8) & R_MASK;
         int al = (instruction >> 7) & 0b1;
         int lr = (instruction >> 6) & 0b1;
@@ -551,12 +523,6 @@ public class MachineController {
     // --- Arithmetic/Logical (Reg-Reg) Instructions ---
 
     private void handleMLT(int rx, int ry) {
-//        if (rx % 2 != 0 || ry % 2 != 0) {
-//            ui.getPrinterArea().append(" -> MLT Fault: rx or ry not 0 or 2.");
-//            state.setMFR(FAULT_ILLEGAL_OPCODE);
-//            handleHLT();
-//            return;
-//        }
 
         long op1 = signExtend(state.getGPR(rx));
         long op2 = signExtend(state.getGPR(ry));
@@ -578,13 +544,6 @@ public class MachineController {
     }
 
     private void handleDVD(int rx, int ry) {
-//        if (rx % 2 != 0 || ry % 2 != 0) {
-//            ui.getPrinterArea().append(" -> DVD Fault: rx or ry not 0 or 2.");
-//            state.setMFR(FAULT_ILLEGAL_OPCODE);
-//            handleHLT();
-//            return;
-//        }
-
         int divisor = state.getGPR(ry);
         state.setCC(state.getCC() & ~(CC_DIVZERO | CC_OVERFLOW));
 
@@ -793,9 +752,6 @@ public class MachineController {
             } else {
                 // Input buffer is empty. Pause and wait.
                 ui.getPrinterArea().append(String.format(" -> IN R%d: Waiting for Console Input...", r));
-
-//                isRunning = false;
-//                SwingUtilities.invokeLater(() -> ui.setStepRunButtonsEnabled(true));
                 return false; // <<<--- RETURN FALSE (Waiting)
             }
         } else {

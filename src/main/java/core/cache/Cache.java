@@ -21,6 +21,8 @@ public class Cache {
     private int lastAccessIndex = -1;
     private AccessKind lastAccessKind = AccessKind.NONE;
 
+    // Counters
+    private long readHits = 0, readMisses = 0, writeHits = 0, writeMisses = 0;
 
     /**
      * Inner class representing a single cache line.
@@ -50,18 +52,12 @@ public class Cache {
      * Clears the cache by invalidating all lines.
      * This is called by MachineState.initialize() during a machine reset.
      */
-//    public void initialize() {
-//        for (int i = 0; i < CACHE_SIZE; i++) {
-//            lines[i].valid = false;
-//        }
-//        this.fifoPointer = 0;
-//    }
-
     public void initialize() {
         for (int i = 0; i < CACHE_SIZE; i++) lines[i].valid = false;
         this.fifoPointer = 0;
         this.lastAccessIndex = -1;
         this.lastAccessKind = AccessKind.NONE;
+        readHits = readMisses = writeHits = writeMisses = 0;
     }
 
 
@@ -104,12 +100,14 @@ public class Cache {
         if (lineIndex != -1) {
             lastAccessIndex = lineIndex;
             lastAccessKind  = AccessKind.READ_HIT;
+            readHits++;
             return lines[lineIndex].data;
         } else {
             int data = machineState.getMemoryDirect(address);
             int idx  = loadLine(address, data);
             lastAccessIndex = idx;
             lastAccessKind  = AccessKind.READ_MISS;
+            readMisses++;
             return data;
         }
     }
@@ -125,10 +123,12 @@ public class Cache {
             lines[lineIndex].data = value;
             lastAccessIndex = lineIndex;
             lastAccessKind  = AccessKind.WRITE_HIT;
+            writeHits++;
         } else {
             int idx = loadLine(address, value); // write-allocate
             lastAccessIndex = idx;
             lastAccessKind  = AccessKind.WRITE_MISS;
+            writeMisses++;
         }
     }
 
@@ -140,16 +140,16 @@ public class Cache {
     public String getCacheStateString() {
         StringBuilder sb = new StringBuilder();
         sb.append(String.format("FIFO Ptr -> %02d\n", fifoPointer));
-        sb.append("LN | V | Tag(Oct) | Data(Oct)\n");
-        sb.append("---|---|----------|----------\n");
+        sb.append("LN    | V      | Tag(Oct) | Data(Oct)\n");
+        sb.append("------|--------|----------|----------\n");
 
         for (int i = 0; i < CACHE_SIZE; i++) {
             CacheLine line = lines[i];
             sb.append(String.format("%02d | %d | %s | %s\n",
                     i,
                     line.valid ? 1 : 0,
-                    line.valid ? String.format("%04o", line.tag) : "----",
-                    line.valid ? String.format("%06o", line.data) : "------"
+                    line.valid ? String.format("%04o", line.tag) : "---------",
+                    line.valid ? String.format("%06o", line.data) : "--------"
             ));
         }
         return sb.toString();
@@ -185,6 +185,14 @@ public class Cache {
         }
         return new Snapshot(fifoPointer, snap, lastAccessIndex, lastAccessKind);
     }
+
+    public long getReadHits()     { return readHits; }
+    public long getReadMisses()   { return readMisses; }
+    public long getWriteHits()    { return writeHits; }
+    public long getWriteMisses()  { return writeMisses; }
+    public long getTotalHits()    { return readHits + writeHits; }
+    public long getTotalMisses()  { return readMisses + writeMisses; }
+
 }
 
 
