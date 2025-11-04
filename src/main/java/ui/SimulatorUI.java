@@ -2,6 +2,8 @@ package src.main.java.ui;
 
 import src.main.java.core.MachineController;
 import src.main.java.core.MachineState;
+import src.main.java.core.cache.Cache;
+import src.main.java.core.cache.Cache.Snapshot;
 
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;
@@ -577,7 +579,7 @@ public class SimulatorUI extends JFrame {
         binaryInputField.setText(String.format("%16s", Integer.toBinaryString(octalValue)).replace(' ', '0'));
 
         cacheContentArea.setText(state.getCache().getCacheStateString());
-        var c = state.getCache();
+        Cache c = state.getCache();
         cacheHitsLbl.setText("Hits: "   + c.getTotalHits());
         cacheMissesLbl.setText("Misses: " + c.getTotalMisses());
         cacheReadLbl.setText("R  H/M: " + c.getReadHits()  + " / " + c.getReadMisses());
@@ -587,7 +589,7 @@ public class SimulatorUI extends JFrame {
     }
 
     private void renderCacheStyled() {
-        var snap = controller.getMachineState().getCache().snapshot();
+        Cache.Snapshot snap = controller.getMachineState().getCache().snapshot();
         javax.swing.text.StyledDocument doc = new javax.swing.text.DefaultStyledDocument();
         javax.swing.text.StyleContext sc = new javax.swing.text.StyleContext();
 
@@ -621,7 +623,7 @@ public class SimulatorUI extends JFrame {
             doc.insertString(doc.getLength(), "---|---|----------|----------\n", hdr);
 
             for (int i = 0; i < snap.lines.length; i++) {
-                var line = snap.lines[i];
+                Cache.SnapshotLine line = snap.lines[i];
                 String tag  = line.valid ? String.format("%04o", line.tag)  : "----";
                 String data = line.valid ? String.format("%06o", line.data) : "------";
                 String row  = String.format("%02d | %d | %s | %s\n",
