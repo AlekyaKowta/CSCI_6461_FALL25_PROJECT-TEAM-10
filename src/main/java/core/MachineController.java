@@ -40,6 +40,8 @@ public class MachineController {
     private static final int FAULT_ILLEGAL_MEM_BEYOND = 8; // MFR 1000 (ID 3)
     private static final int RESERVED_MEM_END = 5;
 
+    private StringBuilder printerLineBuf = new StringBuilder();
+
     private java.util.Queue<Integer> inputBuffer = new java.util.LinkedList<>();
 
     // Condition Code Bits (4 bits: CC(0) to CC(3))
@@ -118,6 +120,8 @@ public class MachineController {
     public void performIPL(String loadFilePath) throws IOException {
         // Machine Reset
         machineReset();
+        ui.clearPrinter();
+
         int firstAddress = -1;
         int linesRead = 0;
 
@@ -358,7 +362,7 @@ public class MachineController {
                         }
                     });
                     // Add sleep outside the EDT loop
-                    Thread.sleep(100);
+                    Thread.sleep(10);
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -810,14 +814,22 @@ public class MachineController {
     }
 
     private void handleOUT(int r, int devid) {
-        int value = state.getGPR(r);
-        char outputChar = (char)(value & 0xFF);
-
+        int value = state.getGPR(r) & 0xFFFF;
         if (devid == DEVID_PRINTER) {
-            ui.getPrinterArea().append(String.format(" -> OUT Printer: '%c'", outputChar));
-        } else {
-            ui.getPrinterArea().append(String.format(" -> OUT R%d: DevID %d not implemented.", r, devid));
+            char ch = (char)(value & 0xFF);
+            ui.appendPrinterChar(value); // keeps the existing console log behavior
+
+            if (ch == '\n') {
+                // deliver the finished line to the big banner (strip trailing CR if you ever add it)
+                String line = printerLineBuf.toString();
+                ui.setLastOutput(line);
+                printerLineBuf.setLength(0);
+            } else {
+                printerLineBuf.append(ch);
+            }
+            return;
         }
+        System.out.println(String.format("OUT R%d: DevID %d not implemented.", r, devid));
     }
 
     private void handleCHK(int r, int devid) {

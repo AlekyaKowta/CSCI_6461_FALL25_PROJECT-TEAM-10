@@ -59,6 +59,9 @@ public class SimulatorUI extends JFrame {
     private JButton loadButton, loadPlusButton, storeButton, storePlusButton;
     private JButton trapButton;
 
+    private final JLabel lastOutputLabel = new JLabel("—", SwingConstants.LEFT);
+    private final StringBuilder currentLine = new StringBuilder();
+
     // --- Output Areas ---
     private JTextArea cacheContentArea, printerArea;
     private JTextField consoleInputField;
@@ -126,7 +129,8 @@ public class SimulatorUI extends JFrame {
         add(centerPanel, BorderLayout.CENTER);
 
         // 2. East Panel (Output/Console)
-        add(createOutputPanel(), BorderLayout.EAST);
+        //add(createOutputPanel(), BorderLayout.EAST);
+        add(buildRightColumn(), BorderLayout.EAST);
 
         pack();
         setLocationRelativeTo(null);
@@ -414,31 +418,184 @@ public class SimulatorUI extends JFrame {
         return p;
     }
 
-    private JPanel createOutputPanel() {
-        JPanel p = new JPanel();
-        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
-        p.setBackground(LIGHT_BLUE);
-        p.setBorder(BorderFactory.createTitledBorder("Console Output/Input"));
+//    private JPanel createOutputPanel() {
+//        JPanel p = new JPanel();
+//        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+//        p.setBackground(LIGHT_BLUE);
+//        p.setBorder(BorderFactory.createTitledBorder("Console Output/Input"));
+//
+//        // Cache Content Area
+//        cacheContentArea = new JTextArea(8, 30);
+//        cacheContentArea.setEditable(false);
+//        cacheContentArea.setBorder(BorderFactory.createTitledBorder("Cache Content"));
+//        p.add(new JScrollPane(cacheContentArea));
+//
+//        // Console Printer Area
+//        printerArea = new JTextArea(10, 30);
+//        printerArea.setEditable(false);
+//        printerArea.setBorder(BorderFactory.createTitledBorder("Printer"));
+//        p.add(new JScrollPane(printerArea));
+//
+//        // Console Input Field
+//        consoleInputField = new JTextField(30);
+//        consoleInputField.setBorder(BorderFactory.createTitledBorder("Console Input"));
+//        p.add(consoleInputField);
+//
+//        return p;
+//    }
 
-        // Cache Content Area
+
+    // ==== Printer helpers (UI-safe) ====
+
+    /** Append a single character to the Printer panel (EDT-safe, autoscroll)
+     *  and mirror the last complete line to the big banner.
+     */
+    public void appendPrinterChar(int value) {
+        final char ch = (char) (value & 0xFF); // device returns 8-bit char
+        SwingUtilities.invokeLater(() -> {
+            // append to console
+            printerArea.append(String.valueOf(ch));
+            printerArea.setCaretPosition(printerArea.getDocument().getLength());
+
+            // track current line and update banner on newline
+            if (ch == '\n' || ch == '\r') {
+                String line = currentLine.toString().trim();
+                if (!line.isEmpty()) setLastOutput(line);  // show the completed line
+                currentLine.setLength(0);                  // reset buffer
+            } else {
+                currentLine.append(ch);
+            }
+        });
+    }
+
+    /** Append text to the Printer panel (EDT-safe, autoscroll). */
+    public void appendPrinter(String text) {
+        SwingUtilities.invokeLater(() -> {
+            printerArea.append(text);
+            printerArea.setCaretPosition(printerArea.getDocument().getLength());
+        });
+    }
+
+    /** Clear the Printer panel (handy at IPL). */
+    public void clearPrinter() {
+        SwingUtilities.invokeLater(() -> printerArea.setText(""));
+    }
+
+    /** Set the big banner text above the console/printer. */
+    public void setLastOutput(String text) {
+        final String safe = (text == null || text.isBlank()) ? "—" : text.trim();
+        SwingUtilities.invokeLater(() -> {
+            if (lastOutputLabel != null) lastOutputLabel.setText(safe);
+        });
+    }
+
+
+    // ===== NEW: Cache panel (separate from Console) =====
+    private JPanel buildCachePanel() {
         cacheContentArea = new JTextArea(8, 30);
         cacheContentArea.setEditable(false);
-        cacheContentArea.setBorder(BorderFactory.createTitledBorder("Cache Content"));
-        p.add(new JScrollPane(cacheContentArea));
+        cacheContentArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        cacheContentArea.setLineWrap(false);
+        JScrollPane cacheScroll = new JScrollPane(
+                cacheContentArea,
+                JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
+        );
 
-        // Console Printer Area
-        printerArea = new JTextArea(10, 30);
-        printerArea.setEditable(false);
-        printerArea.setBorder(BorderFactory.createTitledBorder("Printer"));
-        p.add(new JScrollPane(printerArea));
+        JPanel cachePanel = new JPanel(new BorderLayout(6, 6));
+        cachePanel.setBackground(LIGHT_BLUE);
+        cachePanel.setBorder(BorderFactory.createTitledBorder("Cache Content"));
+        cachePanel.add(cacheScroll, BorderLayout.CENTER);
+        cachePanel.setPreferredSize(new Dimension(480, 220));
+        return cachePanel;
+    }
 
-        // Console Input Field
-        consoleInputField = new JTextField(30);
-        consoleInputField.setBorder(BorderFactory.createTitledBorder("Console Input"));
-        p.add(consoleInputField);
+    // ===== NEW: Last Output panel (large, bold, centered-left) =====
+// ===== NEW: Last Output panel (large, bold, centered-left) =====
+    private JPanel buildLastOutputPanel() {
+        JPanel p = new JPanel(new BorderLayout());
+        p.setBackground(LIGHT_BLUE);
 
+        // style the already-created label
+        lastOutputLabel.setFont(new Font(Font.MONOSPACED, Font.BOLD, 28));
+        lastOutputLabel.setOpaque(true);
+        lastOutputLabel.setBackground(new Color(245, 245, 245));
+        lastOutputLabel.setBorder(BorderFactory.createTitledBorder("Last Output"));
+
+        p.add(lastOutputLabel, BorderLayout.CENTER);
+        p.setPreferredSize(new Dimension(480, 72));
         return p;
     }
+
+
+    // ===== NEW: Console panel (Printer + Console Input only) =====
+    private JPanel buildConsolePanel() {
+        JPanel outer = new JPanel();
+        outer.setLayout(new BoxLayout(outer, BoxLayout.Y_AXIS));
+        outer.setBackground(LIGHT_BLUE);
+        outer.setBorder(BorderFactory.createTitledBorder("Console Output/Input"));
+
+        // Printer (unchanged)
+        printerArea = new JTextArea(10, 30);
+        printerArea.setEditable(false);
+        printerArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        printerArea.setLineWrap(true);
+        printerArea.setWrapStyleWord(true);
+
+        JScrollPane printerScroll = new JScrollPane(printerArea);
+        JPanel printerPanel = new JPanel(new BorderLayout());
+        printerPanel.setBorder(BorderFactory.createTitledBorder("Printer"));
+        printerPanel.add(printerScroll, BorderLayout.CENTER);
+
+        // ---- Input row with Last Output on the RIGHT ----
+        consoleInputField = new JTextField(30);
+
+        // Right-side “Last Output” chip
+        JPanel lastOutChip = new JPanel(new BorderLayout());
+        lastOutChip.setBackground(LIGHT_BLUE);
+
+        lastOutputLabel.setFont(new Font(Font.MONOSPACED, Font.BOLD, 24));
+        lastOutputLabel.setOpaque(true);
+        lastOutputLabel.setBackground(new Color(245, 245, 245));
+        lastOutputLabel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createTitledBorder("Last Output"),
+                BorderFactory.createEmptyBorder(6, 10, 6, 10)
+        ));
+
+        lastOutChip.add(lastOutputLabel, BorderLayout.CENTER);
+        lastOutChip.setPreferredSize(new Dimension(160, 70)); // <- width of the chip at the right
+
+        // Input panel with the chip on the right
+        JPanel inputRow = new JPanel(new BorderLayout(8, 8));
+        inputRow.add(consoleInputField, BorderLayout.CENTER);
+        inputRow.add(lastOutChip, BorderLayout.EAST);
+
+        JPanel inputPanel = new JPanel(new BorderLayout());
+        inputPanel.setBorder(BorderFactory.createTitledBorder("Console Input"));
+        inputPanel.add(inputRow, BorderLayout.CENTER);
+
+        // Stack printer over input+chip
+        outer.add(printerPanel);
+        outer.add(Box.createVerticalStrut(8));
+        outer.add(inputPanel);
+
+        return outer;
+    }
+
+
+    // ===== NEW: Right column stacking Cache above Console =====
+    private JPanel buildRightColumn() {
+        JPanel right = new JPanel();
+        right.setLayout(new BoxLayout(right, BoxLayout.Y_AXIS));
+        right.setBackground(LIGHT_BLUE);
+
+        right.add(buildCachePanel());
+        right.add(Box.createVerticalStrut(8));
+        right.add(buildConsolePanel());
+
+        return right;
+    }
+
 
     // Public getter for the printer area (used by the Controller)
     public JTextArea getPrinterArea() {
@@ -490,7 +647,11 @@ public class SimulatorUI extends JFrame {
         octalInputField.setText(String.format("%06o", octalValue));
         binaryInputField.setText(String.format("%16s", Integer.toBinaryString(octalValue)).replace(' ', '0'));
 
-        cacheContentArea.setText(state.getCache().getCacheStateString());
+        // Refresh Cache panel text
+        if (cacheContentArea != null) {
+            cacheContentArea.setText(state.getCache().getCacheStateString());
+            cacheContentArea.setCaretPosition(0); // keep scrolled to top
+        }
     }
 
     // --- IPL Button Action Handlers ---

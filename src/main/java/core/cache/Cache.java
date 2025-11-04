@@ -16,6 +16,9 @@ public class Cache {
     private int fifoPointer;
     private MachineState machineState; // Reference to main memory
 
+    private long hits = 0;
+    private long misses = 0;
+    private String lastOp = "—";
     /**
      * Inner class representing a single cache line.
      */
@@ -88,15 +91,14 @@ public class Cache {
         int lineIndex = findLine(address);
 
         if (lineIndex != -1) {
-            // --- Cache Hit ---
+            hits++;
+            lastOp = String.format("R @%04o HIT", address);
             return lines[lineIndex].data;
         } else {
-            // --- Cache Miss ---
-            // 1. Fetch from main memory
+            misses++;
             int data = machineState.getMemoryDirect(address);
-            // 2. Load into cache
             loadLine(address, data);
-            // 3. Return the data
+            lastOp = String.format("R @%04o MISS", address);
             return data;
         }
     }
@@ -108,39 +110,45 @@ public class Cache {
     public void writeWord(int address, int value) {
         // 1. Write-Through: Always write to main memory
         machineState.setMemoryDirect(address, value);
-
         int lineIndex = findLine(address);
-
         if (lineIndex != -1) {
-            // --- Cache Hit ---
-            // Update the data in the cache line
+            hits++;
             lines[lineIndex].data = value;
+            lastOp = String.format("W @%04o HIT", address);
         } else {
-            // --- Cache Miss (Write-Allocate) ---
-            // Load this new address/value pair into the cache
-            loadLine(address, value);
+            misses++;
+            loadLine(address, value); // write-allocate
+            lastOp = String.format("W @%04o MISS", address);
         }
     }
 
     /**
-     * Generates a string representation of the cache state for display in the UI.
-     * This directly demonstrates the cache's behavior.
+     * Returns a formatted string representing the entire cache state.
+     *
+     * ISA-compliant formatting:
+     *  - Address (MAR) = 12-bit → 4-digit octal
+     *  - Data (MBR) = 16-bit → 6-digit octal
+     *  - Fully associative cache: 16 lines (index 0–15)
+     *
+     * Shown in UI panel "Cache Content".
      */
     public String getCacheStateString() {
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("FIFO Ptr -> %02d\n", fifoPointer));
-        sb.append("LN | V | Tag(Oct) | Data(Oct)\n");
-        sb.append("---|---|----------|----------\n");
+        sb.append(String.format("FIFO Ptr: %02d   Hits: %d   Misses: %d   Last: %s\n",
+                fifoPointer, hits, misses, lastOp));
+        sb.append("---------------------------------------------\n");
+        sb.append("LN | V | Addr(Oct) | Data(Oct)\n");
+        sb.append("---------------------------------------------\n");
 
         for (int i = 0; i < CACHE_SIZE; i++) {
             CacheLine line = lines[i];
+            String addrStr = line.valid ? String.format("%04o", line.tag) : "----";
+            String dataStr = line.valid ? String.format("%06o", line.data & 0xFFFF) : "------";
             sb.append(String.format("%02d | %d | %s | %s\n",
-                    i,
-                    line.valid ? 1 : 0,
-                    line.valid ? String.format("%04o", line.tag) : "----",
-                    line.valid ? String.format("%06o", line.data) : "------"
-            ));
+                    i, line.valid ? 1 : 0, addrStr, dataStr));
         }
+
+        sb.append("---------------------------------------------\n");
         return sb.toString();
     }
 }
