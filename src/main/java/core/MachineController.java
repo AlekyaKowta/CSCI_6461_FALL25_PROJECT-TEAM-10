@@ -19,7 +19,7 @@ import java.io.IOException;
 public class MachineController {
     private MachineState state;
     private SimulatorUI ui;
-    private boolean isRunning = false;
+    public boolean isRunning = false;
 
     // --- Masks and Constants ---
     private static final int MASK_12_BIT = 0b0000111111111111; // 4095
@@ -39,6 +39,8 @@ public class MachineController {
     private static final int FAULT_ILLEGAL_OPCODE = 4; // MFR 0100 (ID 2)
     private static final int FAULT_ILLEGAL_MEM_BEYOND = 8; // MFR 1000 (ID 3)
     private static final int RESERVED_MEM_END = 5;
+
+    private java.util.Queue<Integer> inputBuffer = new java.util.LinkedList<>();
 
     // Condition Code Bits (4 bits: CC(0) to CC(3))
     private static final int CC_OVERFLOW = 0b1000; // cc(0)
@@ -90,6 +92,10 @@ public class MachineController {
         return state;
     }
 
+    public boolean isRunning() {
+        return this.isRunning;
+    }
+
     // region IPL and Control
     /**
      * Phase 1: Clears all Memory and resets all Registers to 0.
@@ -99,6 +105,7 @@ public class MachineController {
         state.initialize();
         ui.getPrinterArea().setText("");
         ui.getPrinterArea().append("Machine Reset (All registers and memory cleared).\n");
+        ui.clearConsoleOutput();
         ui.updateDisplays();
         isRunning = false;
     }
@@ -139,32 +146,6 @@ public class MachineController {
                 linesRead++;
             }
         }
-
-        // Delete Reserved Memory Code
-        // Set Entry Point ---
-        // 1. Check Reserved Location 5 (ESAR) for the TRUE execution start address.
-        // M[5] will hold the address of the first instruction (e.g., 000016) if the assembler set it.
-//        int executionStartPC = state.getMemory(5);
-//
-//        if (executionStartPC != 0) {
-//            // Option A: Assembler set M[5]. This is the desired execution start.
-//            executionStartPC &= MASK_12_BIT;
-//            state.setPC(executionStartPC);
-//            state.setMAR(executionStartPC);
-//            ui.getPrinterArea().append("IPL successful. Loaded " + linesRead + " instructions.\n");
-//        } else if (firstAddress != -1) {
-//            // Option B: Fallback. M[5] is 0. Use the very first address loaded (e.g., 0006).
-//            // This is primarily for visualization/debugging, acknowledging that execution may fail (hit HLT).
-//            firstAddress &= MASK_12_BIT;
-//            state.setPC(firstAddress);
-//            state.setMAR(firstAddress);
-//            ui.getPrinterArea().append("IPL warning: M[5] not set. PC set to first loaded location: " + String.format("%04o", firstAddress) + ". Execution may start at data.\n");
-//        } else {
-//            // No program loaded
-//            ui.getPrinterArea().append("IPL warning: Load file was empty. PC remains 0.\n");
-//        }
-
-        // Set Entry Point (Option: Always use the first loaded address) ---
 
         if (firstAddress != -1) {
             // PC is set to the first address loaded and masked to 12 bits.
@@ -226,11 +207,9 @@ public class MachineController {
 
         // Fields specific to Shift/Rotate (SRC/RRC)
         // Note: Shift/Rotate format is OpCode (6), R (2), A/L (1), L/R (1), Unused (4), Count (4)
-        // Decoding needs to use correct bits based on Table 9 format
-        // The R field is bits 10-11, A/L is bit 8, L/R is bit 9, Count is bits 0-3.
-        int sr_r = (instruction >> 10) & R_MASK;
-        int lr = (instruction >> 9) & 0b1;
-        int al = (instruction >> 8) & 0b1;
+        int sr_r = (instruction >> 8) & R_MASK;
+        int al = (instruction >> 7) & 0b1;
+        int lr = (instruction >> 6) & 0b1;
         int count = instruction & COUNT_MASK;
 
 
@@ -238,6 +217,7 @@ public class MachineController {
 
         // 3. EXECUTE
         int nextPC = pc + 1;
+        boolean instructionCompleted = true;
 
         try {
             switch (opcode) {
@@ -280,7 +260,7 @@ public class MachineController {
                 case OPCODE_RRC: handleRRC(sr_r, count, lr, al); break;
 
                 // I/O
-                case OPCODE_IN: handleIN(reg, devid); break;
+                case OPCODE_IN: instructionCompleted = handleIN(reg, devid); break;
                 case OPCODE_OUT: handleOUT(reg, devid); break;
                 case OPCODE_CHK: handleCHK(reg, devid); break;
 
@@ -301,14 +281,31 @@ public class MachineController {
 
         // 4. Update PC (only if not halted)
         if (state.getMFR() == 0) {
-            state.setPC(nextPC);
-            state.setMAR(nextPC);
+            if (instructionCompleted) {
+                // If instruction completed (not an IN waiting for input), advance PC
+                state.setPC(nextPC);
+                state.setMAR(nextPC);
+
+                // If it was NOT a continuous run, reset isRunning
+                if (!continuousRun) {
+                    isRunning = false;
+                }
+            } else {
+                // Instruction was IN and is waiting. Don't advance PC.
+                // Stop the continuous run and re-enable controls.
+                isRunning = false;
+                SwingUtilities.invokeLater(() -> ui.setStepRunButtonsEnabled(true));
+            }
+        } else {
+            // If a fault occurred, ensure isRunning is set to false and controls re-enabled
+            handleHLT();
+            return;
         }
 
         // If it was NOT a continuous run, reset isRunning
-        if (!continuousRun) {
-            isRunning = false;
-        }
+//        if (!continuousRun) {
+//            isRunning = false;
+//        }
         ui.updateDisplays();
     }
 
@@ -318,6 +315,8 @@ public class MachineController {
     public void runProgram() {
         if (isRunning) return;
         isRunning = true;
+
+        SwingUtilities.invokeLater(ui::clearConsoleOutput);
 
         // Disable Step and Run buttons
         SwingUtilities.invokeLater(() -> ui.setStepRunButtonsEnabled(false));
@@ -334,7 +333,7 @@ public class MachineController {
                         }
                     });
                     // Add sleep outside the EDT loop
-                    Thread.sleep(100);
+                   // Thread.sleep(100);
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -360,17 +359,24 @@ public class MachineController {
     * Calculate EA with Security Gate
      **/
     private int calculateEA(int ix, int i, int address) {
-        int EA = address;
+        int EA;
 
-        // C(IX) + Address
-        if (ix > 0) {
-            // Index 0 of IXR array is generally unused; X1 is at index 1.
-            EA += state.getIXR(ix);
+        if (ix == 0) {
+            EA = address;
+        } else {
+            // Else If c(IX) = 1..3, Then EA = c(IX) + c(Address) [cite: 191, 193]
+            EA = state.getIXR(ix) + address;
         }
 
         // Indirect Addressing: I=1. EA <- C(EA)
         if (i == 1) {
-            EA = state.getMemory(EA);
+            EA = state.getMemory(EA) & MASK_12_BIT;
+        }
+        
+        if (EA <= 5) {
+            state.setMFR(FAULT_ILLEGAL_MEM_RESERVED);
+            handleHLT();
+            return -1;
         }
 
         if (EA < 0 || EA >= state.MEMORY_SIZE) {
@@ -477,41 +483,46 @@ public class MachineController {
 
     private void handleAIR(int r, int immediate) {
         int rValue = signExtend(state.getGPR(r));
-        long result = (long)rValue + immediate;
+        long result;
 
         if (immediate == 0) {
-            ui.getPrinterArea().append(String.format(" -> AIR R%d: Immed=0. No change.", r));
+            ui.getPrinterArea().append(String.format(" -> AIR R%d: Immed=0. No change (Note 1).", r));
             return;
         }
-
+        if ((state.getGPR(r) & MASK_16_BIT) == 0) {
+            result = immediate;
+            ui.getPrinterArea().append(String.format(" -> AIR R%d <- Immed=%d (Note 2)", r, immediate));
+        } else {
+            result = (long)rValue + immediate;
+            ui.getPrinterArea().append(String.format(" -> AIR R%d <- R%d + %d = %06o", r, r, immediate, (int)result & MASK_16_BIT));
+        }
         setCC_Arithmetic(result);
         state.setGPR(r, (int)result & MASK_16_BIT);
-        ui.getPrinterArea().append(String.format(" -> AIR R%d <- R%d + %d = %06o", r, r, immediate, state.getGPR(r)));
     }
 
     private void handleSIR(int r, int immediate) {
         int rValue = signExtend(state.getGPR(r));
-        long result = (long)rValue - immediate;
+        long result;
 
         if (immediate == 0) {
-            ui.getPrinterArea().append(String.format(" -> SIR R%d: Immed=0. No change.", r));
+            ui.getPrinterArea().append(String.format(" -> SIR R%d: Immed=0. No change (Note 1).", r));
             return;
         }
 
+        if ((state.getGPR(r) & MASK_16_BIT) == 0) {
+            result = -immediate;
+            ui.getPrinterArea().append(String.format(" -> SIR R%d <- -(Immed)=%d (Note 2)", r, result));
+        } else {
+            result = (long)rValue - immediate;
+            ui.getPrinterArea().append(String.format(" -> SIR R%d <- R%d - %d = %06o", r, r, immediate, (int)result & MASK_16_BIT));
+        }
         setCC_Arithmetic(result);
         state.setGPR(r, (int)result & MASK_16_BIT);
-        ui.getPrinterArea().append(String.format(" -> SIR R%d <- R%d - %d = %06o", r, r, immediate, state.getGPR(r)));
     }
 
     // --- Arithmetic/Logical (Reg-Reg) Instructions ---
 
     private void handleMLT(int rx, int ry) {
-        if (rx % 2 != 0 || ry % 2 != 0) {
-            ui.getPrinterArea().append(" -> MLT Fault: rx or ry not 0 or 2.");
-            state.setMFR(FAULT_ILLEGAL_OPCODE);
-            handleHLT();
-            return;
-        }
 
         long op1 = signExtend(state.getGPR(rx));
         long op2 = signExtend(state.getGPR(ry));
@@ -533,13 +544,6 @@ public class MachineController {
     }
 
     private void handleDVD(int rx, int ry) {
-        if (rx % 2 != 0 || ry % 2 != 0) {
-            ui.getPrinterArea().append(" -> DVD Fault: rx or ry not 0 or 2.");
-            state.setMFR(FAULT_ILLEGAL_OPCODE);
-            handleHLT();
-            return;
-        }
-
         int divisor = state.getGPR(ry);
         state.setCC(state.getCC() & ~(CC_DIVZERO | CC_OVERFLOW));
 
@@ -733,20 +737,35 @@ public class MachineController {
 
     // --- I/O Operations ---
 
-    private void handleIN(int r, int devid) {
+    /**
+     * Handles IN instruction.
+     * @return true if execution can continue, false if waiting for input.
+     */
+    private boolean handleIN(int r, int devid) {
         if (devid == DEVID_KEYBOARD) {
-            String input = ui.getConsoleInputField().getText();
-            int charValue = 0;
-            if (input.length() > 0) {
-                charValue = input.charAt(0);
-                state.setGPR(r, charValue & 0xFF);
+            if (!inputBuffer.isEmpty()) {
+                int charValue = inputBuffer.poll(); // Get and remove the head character (ASCII)
+                state.setGPR(r, charValue & 0xFFFF); // Store the full 16-bit value
+
                 ui.getPrinterArea().append(String.format(" -> IN R%d <- Console Char '%c'", r, (char)charValue));
+                return true; // <<<--- RETURN TRUE (Success)
             } else {
-                ui.getPrinterArea().append(String.format(" -> IN R%d: Console Input Empty.", r));
+                // Input buffer is empty. Pause and wait.
+                ui.getPrinterArea().append(String.format(" -> IN R%d: Waiting for Console Input...", r));
+                return false; // <<<--- RETURN FALSE (Waiting)
             }
         } else {
             ui.getPrinterArea().append(String.format(" -> IN R%d: DevID %d not implemented.", r, devid));
+            return true; // (Success for other devices)
         }
+    }
+
+    public void depositInput(String input) {
+        for (char c : input.toCharArray()) {
+            inputBuffer.offer((int) c);
+        }
+        // Optional: Add a newline character to terminate the line visually
+        inputBuffer.offer((int) '\n');
     }
 
     private void handleOUT(int r, int devid) {
@@ -754,7 +773,15 @@ public class MachineController {
         char outputChar = (char)(value & 0xFF);
 
         if (devid == DEVID_PRINTER) {
+            // Log in the step trace
             ui.getPrinterArea().append(String.format(" -> OUT Printer: '%c'", outputChar));
+
+            // Also mirror to the live "Console Output" box
+            ui.appendConsoleOutput(String.valueOf(outputChar));   // <--- NEW
+
+            // (Optional) if you want '\r' ignored, handle it here:
+            // if (outputChar != '\r') ui.appendConsoleOutput(String.valueOf(outputChar));
+
         } else {
             ui.getPrinterArea().append(String.format(" -> OUT R%d: DevID %d not implemented.", r, devid));
         }

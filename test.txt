@@ -1,0 +1,33 @@
+; ----------------------------------------------------------------------
+; Program 1 - Phase 1: Read and Print One Character (ASCII)
+; Uses JMA to ensure the prompt setup code is only run once.
+; ----------------------------------------------------------------------
+
+LOC 6       ; Start loading at address 6
+
+MAIN:
+JMA 0, SETUP, 0 ; Jump to SETUP (unconditional jump, r is ignored)
+
+; --- Skipped instruction (Execution continues at SETUP) ---
+; NOTE: The lines between MAIN and SETUP are now truly skipped.
+; The assembler assigns addresses 7 and 8 to these.
+AIR 0, 31       ; (Address 7)
+AIR 0, 31       ; (Address 8)
+; --- End of skipped code ---
+
+SETUP:
+; 1. SETUP PROMPT: Load ASCII value for '>' (decimal 62) into R0
+; LDA 0,0,0 sets R0 <- 0 (EA=0 when x=0, address=0)
+LDA 0, 0, 0     ; PC=0010 (octal 000010): R0 <- 0. Also sets CC.
+AIR 0, 31       ; PC=0011: R0 <- 31 (since R0 was 0).
+AIR 0, 31       ; PC=0012: R0 <- 31 + 31 = 62 (ASCII for '>')
+OUT 0, 1        ; PC=0013: Prints '>'. Console Printer DevID is 1.
+
+; 2. INPUT: Read character from Console Keyboard (DevID 0) into R0
+IN 0, 0         ; PC=0014: R0 <- Character (ASCII). Console Keyboard DevID is 0.
+
+; 3. OUTPUT: Print character from R0 to Console Printer (DevID 1)
+OUT 0, 1        ; PC=0015: Prints C(R0)
+
+; 4. HALT
+HLT             ; PC=0016: Stop execution

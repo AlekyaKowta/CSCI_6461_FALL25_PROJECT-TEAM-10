@@ -2,6 +2,8 @@ package src.main.java.ui;
 
 import src.main.java.core.MachineController;
 import src.main.java.core.MachineState;
+import src.main.java.core.cache.Cache;
+import src.main.java.core.cache.Cache.Snapshot;
 
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;
@@ -26,6 +28,9 @@ import java.io.IOException;
  * 16-bit registers in 6-digit octal format.
  */
 public class SimulatorUI extends JFrame {
+
+    // Headless mode flag: when true, skip building/showing the Swing frame and no-op UI updates
+    private final boolean headless;
 
     // --- Custom Colors and Constants ---
     private static final Color LIGHT_BLUE = new Color(220, 230, 255); // Pale, light blue for background
@@ -60,19 +65,42 @@ public class SimulatorUI extends JFrame {
     private JButton trapButton;
 
     // --- Output Areas ---
-    private JTextArea cacheContentArea, printerArea;
+    private javax.swing.JTextPane cacheContentArea;
+    private JTextArea printerArea;
     private JTextField consoleInputField;
+
+    private JTextField outputField;
+
+    private JLabel cacheHitsLbl, cacheMissesLbl, cacheReadLbl, cacheWriteLbl;
+
 
     private MachineController controller;
 
-    // Constructor
+    // Constructor (normal GUI)
     public SimulatorUI() {
+        this(false);
+    }
+
+    // Constructor (headless/test mode)
+    public SimulatorUI(boolean headless) {
+        this.headless = headless;
+
         // Initialize MachineState and MachineController, passing 'this' (the UI)
         MachineState state = new MachineState();
         this.controller = new MachineController(state, this);
-        initializeUI();
-        addInputListeners();
-        updateDisplays(); // Initial display update
+
+        if (!headless) {
+            initializeUI();
+            addInputListeners();
+            updateDisplays(); // Initial display update
+        } else {
+            // Minimal components to satisfy controller interactions in tests
+            this.printerArea = new JTextArea();
+            this.outputField = new JTextField();
+            this.consoleInputField = new JTextField();
+            this.octalInputField = new JTextField("000000", 6);
+            this.binaryInputField = new JTextField("0000000000000000", 20);
+        }
     }
 
     private void initializeUI() {
@@ -150,6 +178,28 @@ public class SimulatorUI extends JFrame {
                 // Not used for plain text fields
             }
         });
+
+        consoleInputField.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                String input = consoleInputField.getText();
+                if (!input.isEmpty()) {
+                    // Deposit the input into the controller's buffer
+                    controller.depositInput(input);
+
+                    // Clear the input field after deposit for a clean look
+                    consoleInputField.setText("");
+
+                    // Print the user's input to the printer area for confirmation
+                    printerArea.append(">> " + input + "\n");
+
+                    // If the machine is paused (waiting for input), resume it
+                    if (!controller.isRunning()) {
+                        controller.runProgram();
+                    }
+                }
+            }
+        });
     }
 
     /**
@@ -211,38 +261,54 @@ public class SimulatorUI extends JFrame {
     /**
      * Creates a single column panel for GPR or IXR with register load buttons.
      */
-    private JPanel createRegisterColumn(String title, JTextField[] fields, int start, int end, boolean includeLoadButtons, String initValue, int fieldSize) {
+    private JPanel createRegisterColumn(
+            String title,
+            JTextField[] fields,
+            int start, int end,
+            boolean includeLoadButtons,
+            String initValue,
+            int fieldSize
+    ) {
         JPanel p = new JPanel(new GridBagLayout());
         p.setBackground(LIGHT_BLUE);
         p.setBorder(BorderFactory.createTitledBorder(title));
+
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(3, 3, 3, 3);
-        gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.anchor = GridBagConstraints.WEST;
 
-        // Register fields and Load buttons
         for (int i = start; i < end; i++) {
+            int row = i - start;              // make rows start at 0 inside this panel
+
             String regName = title + " " + i;
-            JLabel label = new JLabel(regName);
+
+            // Label: column 0 (no stretch)
+            gbc.gridx = 0;
+            gbc.gridy = row;
+            gbc.weightx = 0.0;
+            gbc.fill = GridBagConstraints.NONE;
+            p.add(new JLabel(regName), gbc);
+
+            // Field: column 1 (stretch horizontally)
             fields[i] = new JTextField(initValue, fieldSize);
             fields[i].setEditable(false);
 
-            // Label
-            gbc.gridx = 0; gbc.gridy = i;
-            p.add(label, gbc);
-
-            // Field
             gbc.gridx = 1;
+            gbc.gridy = row;
+            gbc.weightx = 1.0;                      // <-- give the text field the width
+            gbc.fill = GridBagConstraints.HORIZONTAL;
             p.add(fields[i], gbc);
 
-            // Load Button
+            // Optional Load button: column 2 (no stretch)
             if (includeLoadButtons) {
                 gbc.gridx = 2;
+                gbc.gridy = row;
+                gbc.weightx = 0.0;
                 gbc.fill = GridBagConstraints.NONE;
                 p.add(createSmallLoadButton(regName), gbc);
-                gbc.fill = GridBagConstraints.HORIZONTAL; // Reset fill
             }
         }
+
         return p;
     }
 
@@ -380,27 +446,81 @@ public class SimulatorUI extends JFrame {
         JPanel p = new JPanel();
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
         p.setBackground(LIGHT_BLUE);
-        p.setBorder(BorderFactory.createTitledBorder("Console Output/Input"));
+        p.setBorder(BorderFactory.createTitledBorder("Cache Area Content"));
 
         // Cache Content Area
-        cacheContentArea = new JTextArea(8, 30);
+        cacheContentArea = new javax.swing.JTextPane();
         cacheContentArea.setEditable(false);
-        cacheContentArea.setBorder(BorderFactory.createTitledBorder("Cache Content"));
-        p.add(new JScrollPane(cacheContentArea));
+        cacheContentArea.setBorder(BorderFactory.createTitledBorder("Cache Lines"));
+        cacheContentArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        JScrollPane cacheScroll = new JScrollPane(cacheContentArea);
+        // make it a bit taller & narrower
+        cacheScroll.setPreferredSize(new Dimension(260, 220));
+        p.add(cacheScroll);
+
+        // Cache Stats Row (hits/misses)
+        JPanel stats = new JPanel(new GridLayout(2, 2, 6, 2));
+        stats.setBackground(Color.WHITE);
+        stats.setBorder(BorderFactory.createTitledBorder("Cache Stats"));
+
+        cacheHitsLbl   = new JLabel("Hits: 0");
+        cacheMissesLbl = new JLabel("Misses: 0");
+        cacheReadLbl   = new JLabel("R  H/M: 0 / 0");
+        cacheWriteLbl  = new JLabel("W  H/M: 0 / 0");
+
+        stats.add(cacheHitsLbl);
+        stats.add(cacheMissesLbl);
+        stats.add(cacheReadLbl);
+        stats.add(cacheWriteLbl);
+
+        p.add(stats);
 
         // Console Printer Area
-        printerArea = new JTextArea(10, 30);
+        printerArea = new JTextArea(8, 24);
         printerArea.setEditable(false);
         printerArea.setBorder(BorderFactory.createTitledBorder("Printer"));
         p.add(new JScrollPane(printerArea));
 
+        JPanel ioRow = new JPanel(new GridLayout(1, 2, 10, 0));
+        ioRow.setBackground(LIGHT_BLUE);
+
         // Console Input Field
-        consoleInputField = new JTextField(30);
-        consoleInputField.setBorder(BorderFactory.createTitledBorder("Console Input"));
-        p.add(consoleInputField);
+        consoleInputField = new JTextField(20);
+        JPanel inputWrap = new JPanel(new BorderLayout(5, 5));
+        inputWrap.setBackground(LIGHT_BLUE);
+        inputWrap.setBorder(BorderFactory.createTitledBorder("Console Input"));
+        inputWrap.add(consoleInputField, BorderLayout.CENTER);
+
+        // Console Output Field
+        outputField = new JTextField(20);
+        outputField.setEditable(false);
+        JPanel outputWrap = new JPanel(new BorderLayout(5, 5));
+        outputWrap.setBackground(LIGHT_BLUE);
+        outputWrap.setBorder(BorderFactory.createTitledBorder("Console Output"));
+        outputWrap.add(outputField, BorderLayout.CENTER);
+
+        ioRow.add(inputWrap);
+        ioRow.add(outputWrap);
+        p.add(ioRow);
 
         return p;
     }
+
+    public void clearConsoleOutput() {
+        if (outputField != null) outputField.setText("");
+    }
+
+    public void setConsoleOutput(String text) {
+        if (outputField != null) outputField.setText(text);
+    }
+
+    public void appendConsoleOutput(String text) {
+        if (outputField != null) {
+            String cur = outputField.getText();
+            outputField.setText((cur == null ? "" : cur) + text);
+        }
+    }
+
 
     // Public getter for the printer area (used by the Controller)
     public JTextArea getPrinterArea() {
@@ -409,6 +529,11 @@ public class SimulatorUI extends JFrame {
 
     public JTextField getConsoleInputField() {
         return consoleInputField;
+    }
+
+    // Expose controller for headless/testing harnesses
+    public MachineController getController() {
+        return controller;
     }
 
     // Public getter for the Octal Input field (needed by MachineController for manual loads)
@@ -425,6 +550,7 @@ public class SimulatorUI extends JFrame {
      * Updates all register and memory displays from the MachineState.
      */
     public void updateDisplays() {
+        if (headless) return; // No-op in headless mode
         MachineState state = controller.getMachineState();
 
         // PC and MAR are 12-bit, displayed as %04o (4 octal digits)
@@ -451,7 +577,75 @@ public class SimulatorUI extends JFrame {
         int octalValue = state.getMBR();
         octalInputField.setText(String.format("%06o", octalValue));
         binaryInputField.setText(String.format("%16s", Integer.toBinaryString(octalValue)).replace(' ', '0'));
+
+        cacheContentArea.setText(state.getCache().getCacheStateString());
+        Cache c = state.getCache();
+        cacheHitsLbl.setText("Hits: "   + c.getTotalHits());
+        cacheMissesLbl.setText("Misses: " + c.getTotalMisses());
+        cacheReadLbl.setText("R  H/M: " + c.getReadHits()  + " / " + c.getReadMisses());
+        cacheWriteLbl.setText("W  H/M: " + c.getWriteHits() + " / " + c.getWriteMisses());
+
+        renderCacheStyled();
     }
+
+    private void renderCacheStyled() {
+        Cache.Snapshot snap = controller.getMachineState().getCache().snapshot();
+        javax.swing.text.StyledDocument doc = new javax.swing.text.DefaultStyledDocument();
+        javax.swing.text.StyleContext sc = new javax.swing.text.StyleContext();
+
+        // Base style
+        javax.swing.text.Style base = sc.addStyle("base", null);
+        javax.swing.text.StyleConstants.setFontFamily(base, Font.MONOSPACED);
+        javax.swing.text.StyleConstants.setFontSize(base, 12);
+
+        // Header style (bold)
+        javax.swing.text.Style hdr = sc.addStyle("hdr", base);
+        javax.swing.text.StyleConstants.setBold(hdr, true);
+
+        // Normal line
+        javax.swing.text.Style normal = sc.addStyle("normal", base);
+
+        // Hit = green background
+        javax.swing.text.Style hit = sc.addStyle("hit", base);
+        javax.swing.text.StyleConstants.setBackground(hit, new Color(205, 240, 205)); // soft green
+
+        // Miss = red background
+        javax.swing.text.Style miss = sc.addStyle("miss", base);
+        javax.swing.text.StyleConstants.setBackground(miss, new Color(255, 215, 215)); // soft red
+
+        // FIFO pointer line highlight (optional, subtle)
+        javax.swing.text.Style fifo = sc.addStyle("fifo", base);
+        javax.swing.text.StyleConstants.setItalic(fifo, true);
+
+        try {
+            doc.insertString(doc.getLength(), String.format("FIFO Ptr -> %02d\n", snap.fifoPointer), fifo);
+            doc.insertString(doc.getLength(), "LN | V | Tag(Oct) | Data(Oct)\n", hdr);
+            doc.insertString(doc.getLength(), "---|---|----------|----------\n", hdr);
+
+            for (int i = 0; i < snap.lines.length; i++) {
+                Cache.SnapshotLine line = snap.lines[i];
+                String tag  = line.valid ? String.format("%04o", line.tag)  : "----";
+                String data = line.valid ? String.format("%06o", line.data) : "------";
+                String row  = String.format("%02d | %d | %s | %s\n",
+                        i, (line.valid ? 1 : 0), tag, data);
+
+                javax.swing.text.Style use = normal;
+                if (i == snap.lastAccessIndex) {
+                    switch (snap.lastAccessKind) {
+                        case READ_HIT:
+                        case WRITE_HIT:  use = hit;  break;
+                        case READ_MISS:
+                        case WRITE_MISS: use = miss; break;
+                        default: use = normal;
+                    }
+                }
+                doc.insertString(doc.getLength(), row, use);
+            }
+        } catch (javax.swing.text.BadLocationException ignore) {}
+
+        cacheContentArea.setDocument(doc);
+    }
+
 
     // --- IPL Button Action Handlers ---
 
@@ -479,6 +673,7 @@ public class SimulatorUI extends JFrame {
     }
 
     public void setStepRunButtonsEnabled(boolean enabled) {
+        if (headless) return; // No-op in headless mode
         singleStepButton.setEnabled(enabled);
         runButton.setEnabled(enabled);
     }

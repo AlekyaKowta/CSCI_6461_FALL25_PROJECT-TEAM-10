@@ -2,10 +2,7 @@ package src.main.java.assembler;
 
 import javax.swing.*;
 import java.io.*;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Arrays;
-import java.util.Map;
+import java.util.*;
 import java.util.function.BiConsumer;
 
 public class Assembler {
@@ -13,12 +10,11 @@ public class Assembler {
     // Tracks current address during assembly
     public int currentAddress = 0;
 
-    // // NEW: Tracks the address of the first actual instruction (not LOC, not Data)
-    // public int firstInstructionAddress = -1;
-
     // Output file names
     public String LISTING_FILE = "ListingFile.txt";
     public String LOAD_FILE = "LoadFile.txt";
+
+    public static final int ADDRESS_MASK = 037;
 
     // Symbol Table mapping labels to addresses
     public HashMap<String, Integer> symbolsMap = new HashMap<>();
@@ -64,10 +60,6 @@ public class Assembler {
     /// <param name="output">Generated machine code lines aligned with source</param>
     public void generateListingFile(ArrayList<String> originalLines, String destinationFile, ArrayList<String> machineCodeOctal) {
         ArrayList<String> dataToWrite = new ArrayList<>();
-
-        // // Rationale: We assume the entry at index 0 is the M[5] Entry Point (System Metadata)
-        // // and that the first line of executable code starts at index 1.
-        // int outputIndex = 1; // START AT INDEX 1 TO SKIP M[5] ENTRY
 
         // Process from start
         int outputIndex = 0;
@@ -123,6 +115,40 @@ public class Assembler {
         }
     }
 
+    private int parseAndValidateR(String operand) {
+        int r = Integer.parseInt(operand);
+        if (r < 0 || r > 3) { // R0-R3
+            throw new IllegalArgumentException("Invalid General Purpose Register (R) number: " + r + ". Must be between 0 and 3.");
+        }
+        return r;
+    }
+
+    private int parseAndValidateIX(String operand) {
+        int ix = Integer.parseInt(operand);
+        if (ix < 0 || ix > 3) { // X0-X3 (where 0 means no indexing)
+            throw new IllegalArgumentException("Invalid Index Register (IX) number: " + ix + ". Must be between 0 and 3.");
+        }
+        return ix;
+    }
+
+    private int parseAndValidateAddress(String operand, boolean isImmediate) {
+        // Resolve labels first
+        int address = resolveOperandToAddress(operand);
+        if (address < 0 || address > 31) { // 5 bits unsigned (Maximum absolute value is 31)
+            String field = isImmediate ? "Immediate" : "Address Field";
+            throw new IllegalArgumentException("Invalid " + field + " value: " + address + ". Must be between 0 and 31.");
+        }
+        return address;
+    }
+
+    private int parseAndValidateEvenR(String operand) {
+        int r = Integer.parseInt(operand);
+        if (r != 0 && r != 2) {
+            throw new IllegalArgumentException("Invalid register for Multiply/Divide operation: " + r + ". Must be 0 or 2.");
+        }
+        return r;
+    }
+
     /// <summary>
     /// Parses load/store and related instructions into machine code words.
     /// Instructions supported vary and have different formats; handled via switch-case.
@@ -151,46 +177,57 @@ public class Assembler {
             case "JCC":
             case "JZ":
             case "JNE":
-            case "JMA":
             case "JSR":
             case "SOB":
             case "JGE":
             case "AMR":
             case "SMR":
-                reg = Integer.parseInt(operands[0]);
-                idx = Integer.parseInt(operands[1]);
-                address = resolveOperandToAddress(operands[2]);
+                reg = parseAndValidateR(operands[0]);
+                idx = parseAndValidateIX(operands[1]);
+                address = parseAndValidateAddress(operands[2], false);
                 indirect = (operands.length > 3) ? Integer.parseInt(operands[3]) : 0; // Optional operand
                 return String.format("%06o\t%06o", currentAddress,
                         (opcode << 10) | (reg << 8) | (idx << 6) | (indirect << 5) | address);
 
+            case "JMA":
+                idx = parseAndValidateIX(operands[0]);
+                address = parseAndValidateAddress(operands[1], false);  // must return 0..31
+                indirect = (operands.length > 2) ? Integer.parseInt(operands[2]) : 0;
+                if (indirect != 0 && indirect != 1) {
+                    throw new IllegalArgumentException("Indirect bit (I) must be 0 or 1 for JMA.");
+                }
+
+                // Bits 9–8 (R field) are 00 for JMA
+                return String.format("%06o\t%06o", currentAddress,
+                        (opcode << 10) | (idx << 6) | (indirect << 5) | (address & 0x1F));
+
             // Instructions with format: opcode x,address[,i]
             case "LDX":
             case "STX":
-                idx = Integer.parseInt(operands[0]);
-                address = resolveOperandToAddress(operands[1]);
+                idx = parseAndValidateIX(operands[0]);
+                address = parseAndValidateAddress(operands[1], false);
                 indirect = (operands.length > 2) ? Integer.parseInt(operands[2]) : 0;
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (idx << 6) | (indirect << 5) | address);
 
             // Instructions with format: opcode r[,i]
             case "SETCCE":
-                reg = Integer.parseInt(operands[0]);
+                reg = parseAndValidateR(operands[0]);
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg << 8));
 
             // Instructions with format: opcode address
             case "RFS":
-                address = resolveOperandToAddress(operands[0]);
+                address = parseAndValidateAddress(operands[0], true);
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | address);
 
             // Instructions with format: opcode r,address
             case "AIR":
             case "SIR":
-                reg = Integer.parseInt(operands[0]);
-                address = resolveOperandToAddress(operands[1]);
+                reg = parseAndValidateR(operands[0]);
+                address = parseAndValidateAddress(operands[1], true); // Immed is validated
                 return String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg << 8) | address);
 
             default:
-                return "ERROR: Unknown or invalid instruction!";
+                return String.format("ERROR: Unknown or invalid instruction! Mnemonic: %s", instructionComponents[0]);
         }
     }
 
@@ -209,71 +246,89 @@ public class Assembler {
         String row;
 
         while ((row = reader.readLine()) != null) {
-            originalLines.add(row);  // preserve comment lines
-            String clean = row;
-            int commentIndex = row.indexOf(';');
-            if (commentIndex != -1) {
-                clean = row.substring(0, commentIndex).trim();
-            } else {
-                clean = row.trim();
-            }
-            if (!clean.isEmpty()) {
-                cleanLines.add(clean);
-            }
+            originalLines.add(row);
+            int semi = row.indexOf(';');
+            String clean = (semi >= 0 ? row.substring(0, semi) : row).trim();
+            if (!clean.isEmpty()) cleanLines.add(clean);
         }
         reader.close();
 
-        currentAddress = 0; // Reset for Pass 1 Symbol Table build
-        // Delete reserved code
-        // boolean isFirstExecutableInstruction = true; // Flag to track first instruction
+        // Opcodes/pseudo-ops that allocate exactly one 16-bit word
+        final Set<String> oneWordOps = new HashSet<>(Arrays.asList(
+                // Misc
+                "HLT","TRAP",
+                // Load/Store
+                "LDR","STR","LDA","LDX","STX",
+                // Transfer
+                "JZ","JNE","JCC","JMA","JSR","RFS","SOB","JGE",
+                // Arithmetic/Logical (memory/immediate)
+                "AMR","SMR","AIR","SIR",
+                // Register-to-register & mult/div/logical
+                "MLT","DVD","TRR","AND","ORR","NOT",
+                // Shift/Rotate
+                "SRC","RRC",
+                // I/O
+                "IN","OUT","CHK",
+                // Floating/vector (if you implement them now)
+                "FADD","FSUB","VADD","VSUB","CNVRT","LDFR","STFR"
+        ));
 
-        // Symbol table build on clean lines
+        currentAddress = 0;
+
         for (String line : cleanLines) {
-            if (line.startsWith("LOC")) {
-                String locationString = "LOC";
-                currentAddress = Integer.parseInt(line.substring(locationString.length()).trim());
-                continue;
-            }
+            String s = line.trim();
 
-            int symbolIndex = line.indexOf(':');
-            if (symbolIndex != -1) {
-                String label = line.substring(0, symbolIndex).trim();
+            // Handle "LOC n" anywhere on the line (with or without label)
+            // Split label (if present)
+            int colon = s.indexOf(':');
+            String label = null;
+            String body = s;
+            if (colon >= 0) {
+                label = s.substring(0, colon).trim();
+                body  = s.substring(colon + 1).trim();
+                // Duplicate label guard
+                if (symbolsMap.containsKey(label)) {
+                    throw new IllegalArgumentException("Duplicate label: " + label);
+                }
                 symbolsMap.put(label, currentAddress);
             }
 
-            if (!line.isEmpty()) {
-                // Delete reserved space code
-                // // If this is the first non-LOC, non-label, non-blank line, record its address.
-                // if (isFirstExecutableInstruction && !line.startsWith("Data")) {
-                //     this.firstInstructionAddress = currentAddress;
-                //     isFirstExecutableInstruction = false;
-                // }
-                currentAddress++;
+            if (body.isEmpty()) continue;
+
+            // Tokenize body to identify directive/opcode
+            String[] toks = body.split("\\s+|\\t+|,\\s*");
+            if (toks.length == 0) continue;
+
+            String head = toks[0].toUpperCase(Locale.ROOT);
+
+            // LOC does NOT allocate memory
+            if ("LOC".equals(head)) {
+                if (toks.length < 2) {
+                    throw new IllegalArgumentException("LOC requires a decimal address.");
+                }
+                int loc = Integer.parseInt(toks[1]); // ISA: decimal in source
+                currentAddress = loc;
+                continue;
             }
+
+            // DATA allocates exactly one word
+            if ("DATA".equals(head)) {
+                currentAddress += 1;
+                continue;
+            }
+
+            // Known opcodes allocate one word
+            if (oneWordOps.contains(head)) {
+                currentAddress += 1;
+                continue;
+            }
+
+            // Anything else is an error in pass 1 (prevents phantom increments)
+            throw new IllegalArgumentException("Unknown opcode/directive in pass 1: " + head);
         }
+
         return cleanLines;
     }
-
-    /// <summary>
-    /// Injects the address of the first executable instruction into M[5].
-    /// DELETE RESERVE CODE
-    /// </summary>
-    // private void injectEntrypoint() {
-    //     if (firstInstructionAddress != -1) {
-    //         // Reserved Memory Address 5 is used as the Execution Start Address Register (ESAR) location.
-    //         int reservedAddress5 = 5;
-    //
-    //         // 1. Format the true starting address (e.g., 000016) into 6-digit octal.
-    //         String entryPointValueOctal = String.format("%06o", firstInstructionAddress);
-    //
-    //         // 2. Create the system metadata line: "000005 [TAB] 000016"
-    //         String entryPointLine = String.format("%06o\t%s", reservedAddress5, entryPointValueOctal);
-    //
-    //         // 3. CRITICAL: Inject this line at index 0 of the machineCodeOctal list.
-    //         // This ensures M[5] is the very first entry in the Load File.
-    //         machineCodeOctal.add(0, entryPointLine);
-    //     }
-    // }
 
     /// <summary>
     /// Second pass assembles machine codes line by line using appropriate handlers based on opcode.
@@ -326,10 +381,10 @@ public class Assembler {
             BiConsumer<String[], ArrayList<String>> handler = handlerMap.get(opcode);
             if (handler != null) {
                 handler.accept(instructionComponents, machineCodeOctal);
+                currentAddress++;
             } else {
-                machineCodeOctal.add("ERROR: Unknown instruction!");
+                machineCodeOctal.add(String.format("ERROR: Unknown instruction! Mnemonic: %s", opcode));
             }
-            currentAddress++;
         }
 
         // Delete Reserved Space code
@@ -363,13 +418,18 @@ public class Assembler {
         int opcode = OpCodeTables.arithmeticAndLogic.get(instructionComponents[0]);
         String[] operands = parseOperands(instructionComponents[1]);
         int reg1, reg2;
-        if (instructionComponents[0].equals("AND") || instructionComponents[0].equals("ORR")
-                || instructionComponents[0].equals("MLT") || instructionComponents[0].equals("DVD") || instructionComponents[0].equals("TRR")) {
-            reg1 = Integer.parseInt(operands[0]);
-            reg2 = Integer.parseInt(operands[1]);
+        if (instructionComponents[0].equals("MLT") || instructionComponents[0].equals("DVD")) {
+            reg1 = parseAndValidateEvenR(operands[0]);
+            reg2 = parseAndValidateEvenR(operands[1]);
+            machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg1 << 8) | (reg2 << 6)));
+        }
+        else if (instructionComponents[0].equals("AND") || instructionComponents[0].equals("ORR")
+                || instructionComponents[0].equals("TRR")) {
+            reg1 = parseAndValidateR(operands[0]);
+            reg2 = parseAndValidateR(operands[1]);
             machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg1 << 8) | (reg2 << 6)));
         } else if (instructionComponents[0].equals("NOT")) {
-            reg1 = Integer.parseInt(operands[0]);
+            reg1 = parseAndValidateR(operands[0]);
             machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (reg1 << 8)));
         }
     }
@@ -381,23 +441,30 @@ public class Assembler {
         // NOTE: This assumes OpCodeTables is in scope and initialized
         int opcode = OpCodeTables.shiftRotate.get(instructionComponents[0]);
         String[] operands = parseOperands(instructionComponents[1]);
-        int a = Integer.parseInt(operands[0]);
-        int b = Integer.parseInt(operands[1]);
-        int c = Integer.parseInt(operands[2]);
-        int d = Integer.parseInt(operands[3]);
-        machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (a << 8) | (d << 7) | (c << 6) | b));
+        int r = parseAndValidateR(operands[0]); // R field (a)
+        int count = Integer.parseInt(operands[1]); // Count field (b)
+        int lr = Integer.parseInt(operands[2]); // L/R field (c)
+        int al = Integer.parseInt(operands[3]); // A/L field (d)
+
+        if (count < 0 || count > 15) {
+            throw new IllegalArgumentException("Invalid Count value for Shift/Rotate: " + count + ". Must be between 0 and 15 (4 bits).");
+        }
+        machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (r << 8) | (al << 7) | (lr << 6) | count));
     }
 
     /// <summary>
     /// Additional Helper Methods for secondPass: IO
     /// </summary>
     private void handleIO(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
-        // NOTE: This assumes OpCodeTables is in scope and initialized
         int opcode = OpCodeTables.io.get(instructionComponents[0]);
         String[] operands = parseOperands(instructionComponents[1]);
-        Arrays.setAll(operands, i -> operands[i].trim());
-        int r = Integer.parseInt(operands[0]);
+        int r = parseAndValidateR(operands[0]);
         int devId = Integer.parseInt(operands[1]);
+
+        if (devId < 0 || devId > 31) {
+            throw new IllegalArgumentException("Invalid Device ID: " + devId + ". Must be between 0 and 31 (5 bits).");
+        }
+
         machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | (r << 8) | devId));
     }
 
@@ -405,7 +472,6 @@ public class Assembler {
     /// Additional Helper Methods for secondPass: Miscellaneous
     /// </summary>
     private void handleMisc(String[] instructionComponents, ArrayList<String> machineCodeOctal) {
-        // NOTE: This assumes OpCodeTables is in scope and initialized
         int opcode = OpCodeTables.miscellaneous.get(instructionComponents[0]);
         switch (instructionComponents[0]) {
             case "HLT":
@@ -414,6 +480,9 @@ public class Assembler {
             case "TRAP":
                 if (instructionComponents.length > 1) {
                     int operand = Integer.parseInt(instructionComponents[1]);
+                    if (operand < 0 || operand > 15) {
+                        throw new IllegalArgumentException("Invalid TRAP code: " + operand + ". Must be between 0 and 15 (4 bits).");
+                    }
                     machineCodeOctal.add(String.format("%06o\t%06o", currentAddress, (opcode << 10) | operand));
                 } else {
                     machineCodeOctal.add("ERROR: Missing operand for TRAP instruction!");
@@ -440,56 +509,87 @@ public class Assembler {
     /// Main method to run assembler: reads source file, performs assembly passes, and writes outputs.
     /// </summary>
     public static void main(String[] args) {
-        try {
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+    try {
+        // Ensure L&F is set on the EDT before any Swing UI
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+            try {
+                javax.swing.UIManager.setLookAndFeel(javax.swing.UIManager.getSystemLookAndFeelClassName());
+            } catch (Exception ignored) {}
+        });
 
-            JFileChooser fileChooser = new JFileChooser(".");
-            fileChooser.setDialogTitle("Select Assembly Source File");
+        // Determine input source (CLI arg preferred to avoid chooser in IDE runs)
+        String inputSourceFile;
+        if (args != null && args.length > 0) {
+            inputSourceFile = new java.io.File(args[0]).getAbsolutePath();
+        } else {
+            final String[] chosen = new String[1];
 
-            int userSelection = fileChooser.showOpenDialog(null);
+            // Show JFileChooser on the EDT with a visible owner to avoid macOS window stacking issues
+            javax.swing.SwingUtilities.invokeAndWait(() -> {
+                javax.swing.JFileChooser fileChooser = new javax.swing.JFileChooser(".");
+                fileChooser.setDialogTitle("Select Assembly Source File");
 
-            if (userSelection == JFileChooser.APPROVE_OPTION) {
-                File fileToOpen = fileChooser.getSelectedFile();
-                String inputSourceFile = fileToOpen.getAbsolutePath();
+                javax.swing.JFrame owner = new javax.swing.JFrame();
+                owner.setUndecorated(true);
+                owner.setAlwaysOnTop(true);
+                // Mark as utility window (helps macOS focus behavior)
+                try {
+                    owner.setType(java.awt.Window.Type.UTILITY);
+                } catch (Throwable ignored) { /* not available on older JREs */ }
 
-                Assembler assembler = new Assembler();
+                owner.setLocationRelativeTo(null);
+                owner.setVisible(true);
 
-                ArrayList<String> originalLines = new ArrayList<>();
-
-                // First Pass
-                ArrayList<String> cleanedLines = assembler.firstPassWithComments(inputSourceFile, originalLines);
-
-                // Debug: print symbol table
-                System.out.println("Symbol Table:");
-                for (String key : assembler.symbolsMap.keySet()) {
-                    System.out.println(key + " -> " + assembler.symbolsMap.get(key));
+                try {
+                    int result = fileChooser.showOpenDialog(owner);
+                    if (result == javax.swing.JFileChooser.APPROVE_OPTION) {
+                        chosen[0] = fileChooser.getSelectedFile().getAbsolutePath();
+                    }
+                } finally {
+                    owner.dispose();
                 }
+            });
 
-                // Debug: print cleaned input lines
-                System.out.println("\nOriginal Input Lines:");
-                for (String line : originalLines) {
-                    System.out.println(line);
-                }
-
-                // Second pass
-                assembler.secondPass(cleanedLines);
-                //Generate Listing File
-                assembler.generateListingFile(originalLines, assembler.LISTING_FILE, assembler.machineCodeOctal);
-                System.out.println("\nAssembly completed. Check listingFile.txt and LoadFile.txt for output.");
-            }
-            else{
+            if (chosen[0] == null) {
                 System.out.println("No file selected. Exiting...");
+                return;
             }
-        } catch (IllegalArgumentException e) {
-            System.err.println("ASSEMBLER FATAL ERROR: " + e.getMessage());
-            System.exit(1);
-        } catch (IOException e) {
-            System.err.println("FILE I/O ERROR: " + e.getMessage());
-            System.exit(1);
-        } catch (Exception e) {
-            System.err.println("UNEXPECTED ERROR: " + e.getMessage());
-            e.printStackTrace();
-            System.exit(1);
+            inputSourceFile = chosen[0];
         }
+
+        // === Your original assembly flow (preserves comments via originalLines) ===
+        Assembler assembler = new Assembler();
+
+        java.util.ArrayList<String> originalLines = new java.util.ArrayList<>();
+        // First pass that preserves comments into originalLines
+        java.util.ArrayList<String> cleanedLines = assembler.firstPassWithComments(inputSourceFile, originalLines);
+
+        // Debug: print symbol table
+        System.out.println("Symbol Table:");
+        for (java.util.Map.Entry<String, Integer> e : assembler.symbolsMap.entrySet()) {
+            System.out.println(e.getKey() + " -> " + e.getValue());
+        }
+
+        // Debug: print original input lines (with comments preserved)
+        System.out.println("\nOriginal Input Lines:");
+        for (String line : originalLines) {
+            System.out.println(line);
+        }
+
+        // Second pass + outputs
+        assembler.secondPass(cleanedLines);
+        assembler.generateListingFile(originalLines, assembler.LISTING_FILE, assembler.machineCodeOctal);
+
+        System.out.println("\nAssembly completed. Check listingFile.txt and LoadFile.txt for output.");
+
+    } catch (IllegalArgumentException e) {
+        System.err.println("ASSEMBLER FATAL ERROR: " + e.getMessage());
+    } catch (java.io.IOException e) {
+        System.err.println("FILE I/O ERROR: " + e.getMessage());
+    } catch (Exception e) {
+        System.err.println("UNEXPECTED ERROR: " + e.getMessage());
+        e.printStackTrace();
     }
+}
+
 }

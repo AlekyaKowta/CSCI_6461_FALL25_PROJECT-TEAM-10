@@ -1,0 +1,6 @@
+src/main/java/ui/SimulatorUI.java
+src/main/java/core/cache/Cache.java
+src/main/java/core/MachineController.java
+src/main/java/core/MachineState.java
+src/main/java/assembler/OpCodeTables.java
+src/main/java/assembler/Assembler.java
