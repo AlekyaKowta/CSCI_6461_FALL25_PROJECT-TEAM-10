@@ -25,12 +25,10 @@ The project is divided into progressive components, each building upon the previ
 
 The project source is organized into modular Java packages, separating the core machine logic, assembler, and graphical user interface.
 
-src/
- ├── main/java/
- │── core/               → MachineState, MachineController, and CPU logic
- │── core/cache/         → Cache implementation (Project 2)
- │── assembler/          → Assembler for ISA-compliant program loading
- │── ui/                 → Swing-based front panel simulator UI
+src/main/java/core: MachineState, MachineController, and CPU logic
+src/main/core/cache: src Cache implementation (Project 2)
+src/main/java/assembler: Assembler for ISA-compliant program loading
+src/main/java/ui: SimulatorUI Assembler for ISA-compliant program loading
 
 
 ## Component 0: Assembler
