@@ -105,6 +105,7 @@ public class MachineController {
         state.initialize();
         ui.getPrinterArea().setText("");
         ui.getPrinterArea().append("Machine Reset (All registers and memory cleared).\n");
+        ui.clearConsoleOutput();
         ui.updateDisplays();
         isRunning = false;
     }
@@ -342,6 +343,8 @@ public class MachineController {
     public void runProgram() {
         if (isRunning) return;
         isRunning = true;
+
+        SwingUtilities.invokeLater(ui::clearConsoleOutput);
 
         // Disable Step and Run buttons
         SwingUtilities.invokeLater(() -> ui.setStepRunButtonsEnabled(false));
@@ -814,7 +817,15 @@ public class MachineController {
         char outputChar = (char)(value & 0xFF);
 
         if (devid == DEVID_PRINTER) {
+            // Log in the step trace
             ui.getPrinterArea().append(String.format(" -> OUT Printer: '%c'", outputChar));
+
+            // Also mirror to the live "Console Output" box
+            ui.appendConsoleOutput(String.valueOf(outputChar));   // <--- NEW
+
+            // (Optional) if you want '\r' ignored, handle it here:
+            // if (outputChar != '\r') ui.appendConsoleOutput(String.valueOf(outputChar));
+
         } else {
             ui.getPrinterArea().append(String.format(" -> OUT R%d: DevID %d not implemented.", r, devid));
         }

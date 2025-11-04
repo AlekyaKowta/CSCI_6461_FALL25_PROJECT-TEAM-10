@@ -66,6 +66,8 @@ public class SimulatorUI extends JFrame {
     private JTextArea cacheContentArea, printerArea;
     private JTextField consoleInputField;
 
+    private JTextField outputField;
+
     private MachineController controller;
 
     // Constructor (normal GUI)
@@ -88,6 +90,7 @@ public class SimulatorUI extends JFrame {
         } else {
             // Minimal components to satisfy controller interactions in tests
             this.printerArea = new JTextArea();
+            this.outputField = new JTextField();
             this.consoleInputField = new JTextField();
             this.octalInputField = new JTextField("000000", 6);
             this.binaryInputField = new JTextField("0000000000000000", 20);
@@ -451,13 +454,46 @@ public class SimulatorUI extends JFrame {
         printerArea.setBorder(BorderFactory.createTitledBorder("Printer"));
         p.add(new JScrollPane(printerArea));
 
+        JPanel ioRow = new JPanel(new GridLayout(1, 2, 10, 0));
+        ioRow.setBackground(LIGHT_BLUE);
+
         // Console Input Field
         consoleInputField = new JTextField(30);
-        consoleInputField.setBorder(BorderFactory.createTitledBorder("Console Input"));
-        p.add(consoleInputField);
+        JPanel inputWrap = new JPanel(new BorderLayout(5, 5));
+        inputWrap.setBackground(LIGHT_BLUE);
+        inputWrap.setBorder(BorderFactory.createTitledBorder("Console Input"));
+        inputWrap.add(consoleInputField, BorderLayout.CENTER);
+
+        // Console Output Field
+        outputField = new JTextField(30);
+        outputField.setEditable(false);
+        JPanel outputWrap = new JPanel(new BorderLayout(5, 5));
+        outputWrap.setBackground(LIGHT_BLUE);
+        outputWrap.setBorder(BorderFactory.createTitledBorder("Console Output"));
+        outputWrap.add(outputField, BorderLayout.CENTER);
+
+        ioRow.add(inputWrap);
+        ioRow.add(outputWrap);
+        p.add(ioRow);
 
         return p;
     }
+
+    public void clearConsoleOutput() {
+        if (outputField != null) outputField.setText("");
+    }
+
+    public void setConsoleOutput(String text) {
+        if (outputField != null) outputField.setText(text);
+    }
+
+    public void appendConsoleOutput(String text) {
+        if (outputField != null) {
+            String cur = outputField.getText();
+            outputField.setText((cur == null ? "" : cur) + text);
+        }
+    }
+
 
     // Public getter for the printer area (used by the Controller)
     public JTextArea getPrinterArea() {
