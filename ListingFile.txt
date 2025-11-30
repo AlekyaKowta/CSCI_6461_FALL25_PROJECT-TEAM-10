@@ -1,496 +1,310 @@
-; closest_n_unrolled.asm
-; IMPORTANT: Reserved memory addresses 000000..000005 are used by the machine and must not
-; be executed or written by user programs. We explicitly set the program origin to 000006
-; to avoid these reserved locations. Do not define labels/data that bind to 0..5.
-; Reads N (multi-digit, signed), then reads N candidates (multi-digit, signed), then reads 1 target (multi-digit, signed).
-; Numbers are separated by any non-digit delimiter (e.g., space/newline/comma). Optional leading '-' is supported.
-; Uses a compact parser that accumulates base-10 via shifts (x10 = x8 + x2). OUT still uses R3.
-; Memory map (decimal):
-; CAND0..CAND8 -> 129..137 (octal 0201..0207)
-; TEMP_DIFF -> 140 (octal 0210)
-; MIN_DIFF -> 141 (0211)
-; WINNER   -> 142 (0212)
-; CNT, CNT_INIT -> 143,144 etc
+; paragraph_search.asm
+; Program: Read a paragraph from file, print it, prompt for a word,
+; search for the word, and print the word with sentence and word indices.
+; Uses TRAP services:
+;  - TRAP 0: Load file at R0; returns R1=len
+;  - TRAP 1: Print memory from R0 length R1
+;  - TRAP 2: Read a word into memory at R0; returns R1=len
+;  - TRAP 3: Search paragraph (R0..R3) -> R4=sentence#, R5=word#
 
-; Program origin set beyond reserved addresses (0..5) and above low-constant window (<=31)
-; NOTE: The assembler parses numeric literals as DECIMAL. Addresses printed in logs are OCTAL.
-; We start at LOC 40 (decimal). Low constants at LOC 20 (decimal). Pointer tables at 300 and 340 (decimal).
+; Start code at safe location beyond reserved 0..5
 LOC 40
 
-; --- Bootstrap: initialize index registers ---
-; X1 -> DATA BASE (500 decimal)  ; moved far from pointer tables at 300..339 and 340..
-; X2 -> PTR TABLE 1 BASE (300 decimal)
-; X3 -> PTR TABLE 2 BASE (340 decimal)
+; Setup base pointers (X1 for data, X2 for pointer table)
 000050	102124 LDX 1,DBASE_LO
 000051	102225 LDX 2,PTBASE1_LO
-000052	102326 LDX 3,PTBASE2_LO
 
-ENTRY:
+; Load paragraph from file into buffer at PARA_BUF
+000052	006240 LDA 0,2,0,1     ; R0 <- &PARA_BUF (PTR_PARA_BUF)
+000053	060000 TRAP 0               ; Load file, R1 <- length
+000054	004641 STR 1,2,1,1     ; Save paragraph length (PTR_PARA_LEN)
 
-; === Static-20 mode bootstrap ===
-; Fixed-input mode: read exactly 20 candidates, then 1 target
-; Initialize CNT_INIT=20, CNT=20, IDX=0, set MODE=1 (candidates), start parser
+; Print the paragraph
+000055	006240 LDA 0,2,0,1
+000056	002641 LDR 1,2,1,1
+000057	060001 TRAP 1
 
-; Set CNT_INIT = 20 and CNT = 20
-000053	002120     LDR 0,1,16
-000054	014012     AIR 0,10
-000055	014012     AIR 0,10
-000056	004113     STR 0,1,11
-000057	004112     STR 0,1,10
-; IDX = 0
-000060	002120     LDR 0,1,16
-000061	004115     STR 0,1,13
-; MODE=1 (reading candidates)
-000062	003120     LDR 2,1,16
-000063	015001     AIR 2,1
-000064	005110     STR 2,1,8
-    ; reset parser state and jump to RINT_LOOP
-000065	002120     LDR 0,1,16
-000066	002520     LDR 1,1,16
-000067	003120     LDR 2,1,16
-000070	003520     LDR 3,1,16
-000071	026241     JMA 2,1,1
+; Newline
+000060	003650 LDR 3,2,8,1
+000061	145401 OUT 3,1
 
-RINT_LOOP:
-000072	143400     IN 3,0
-000073	005516     STR 3,1,14
-    ; If no digit seen, allow leading '-'
-000074	021242     JZ 2,2,2,1
-RINT_DIGIT_CHECK:
-000075	003516     LDR 3,1,14
-000076	013505     SMR 3,1,5
-000077	037644     JGE 3,2,4,1
-    ; Not a digit: skip if no digit yet, else done
-000100	021241     JZ 2,2,1,1
-000101	026247     JMA 2,7,1
+; Prompt for the word: "Enter word: "
+000062	006253 LDA 0,2,11,1
+000063	002652 LDR 1,2,10,1
+000064	014414 AIR 1,12
+000065	060001 TRAP 1
 
-RINT_CHECK_SIGN:
-000102	003516     LDR 3,1,14
-000103	013506     SMR 3,1,6
-000104	021645     JZ 3,2,5,1
-000105	026243     JMA 2,3,1
+; newline after prompt
+000066	003650 LDR 3,2,8,1      ; R3 <- '\n' via PTR_ASCII_NL
+000067	145401 OUT 3,1
 
-RINT_SET_NEG:
-000106	002520     LDR 1,1,16
-000107	014401     AIR 1,1
-000110	026241     JMA 2,1,1
+; Read a word into WORD_BUF
+000070	006242 LDA 0,2,2,1
+000071	060002 TRAP 2               ; R1 <- word length
+000072	004643 STR 1,2,3,1
 
-RINT_GE_ZERO:
-000111	017412     SIR 3,10
-000112	037646     JGE 3,2,6,1
-000113	015412     AIR 3,10
-    ; seenDigit = 1
-000114	003120     LDR 2,1,16
-000115	015001     AIR 2,1
-    ; Accumulate: R0 = R0*10 + digit
-000116	005517     STR 3,1,15
-000117	004116     STR 0,1,14
-000120	002116     LDR 0,1,14
-000121	062301     SRC 0,1,1,1
-000122	004107     STR 0,1,7
-000123	002116     LDR 0,1,14
-000124	062303     SRC 0,3,1,1
-000125	010107     AMR 0,1,7
-000126	010117     AMR 0,1,15
-000127	026241     JMA 2,1,1
+; Prepare search parameters and perform TRAP 3
+000073	007242 LDA 2,2,2,1     ; R2 <- &WORD_BUF
+000074	003643 LDR 3,2,3,1     ; R3 <- word length
+000075	006240 LDA 0,2,0,1     ; R0 <- &PARA_BUF
+000076	002641 LDR 1,2,1,1     ; R1 <- paragraph length
+000077	060003 TRAP 3               ; R0=sentence#, R1=word#
 
-RINT_NOT_DIGIT:
-000130	021241     JZ 2,2,1,1
-    ; else done
-RINT_DONE:
-    ; Apply sign if needed
-000131	020650     JZ 1,2,8,1
-000132	172000     NOT 0
-000133	014001     AIR 0,1
-RINT_POS:
-    ; Dispatch by MODE (MIN_DIFF): 0->N_POST, 1->CAND_POST, 2->T_POST
-000134	003110     LDR 2,1,8
-000135	021251     JZ 2,2,9,1
-000136	017001     SIR 2,1
-000137	021253     JZ 2,2,11,1
-    ; else target
-000140	026264     JMA 2,20,1
+; If not found (R0==0), print message and halt
+000100	020072 JZ 0,0,NOT_FOUND_PTR,1
 
-N_POST:
-    ; Cap N to 5 and store CNT/CNT_INIT, then go to candidate loop
-000141	004117     STR 0,1,15       ; PRINT_TMP = N
-000142	003117     LDR 2,1,15
-000143	017005     SIR 2,5                 ; R2 = N - 5
-000144	037252     JGE 2,2,10,1
-    ; else store N as-is
-000145	002117     LDR 0,1,15
-000146	004112     STR 0,1,10
-000147	004113     STR 0,1,11
-000150	002120     LDR 0,1,16
-000151	004115     STR 0,1,13
-    ; Next: read candidates
-    ; Set MODE=1 (CAND)
-000152	003120     LDR 2,1,16
-000153	015001     AIR 2,1
-000154	005110     STR 2,1,8
-    ; Reset parser state and loop
-000155	002120     LDR 0,1,16
-000156	002520     LDR 1,1,16
-000157	003120     LDR 2,1,16
-000160	026241     JMA 2,1,1
+; Save results for later, because R0/R1 will be repurposed for printing
+000101	004265 STR 0,2,21,1    ; SENT_NO (PTR_SENT_NO offset 21)
+000102	004666 STR 1,2,22,1    ; WORD_NO (PTR_WORD_NO offset 22)
 
-N_CAP:
-000161	002120     LDR 0,1,16
-000162	014005     AIR 0,5
-000163	004112     STR 0,1,10
-000164	004113     STR 0,1,11
-000165	002120     LDR 0,1,16
-000166	004115     STR 0,1,13
-    ; MODE=1 and restart parser for candidates
-000167	003120     LDR 2,1,16
-000170	015001     AIR 2,1
-000171	005110     STR 2,1,8
-000172	002120     LDR 0,1,16
-000173	002520     LDR 1,1,16
-000174	003120     LDR 2,1,16
-000175	026241     JMA 2,1,1
+; Print result: "Word: " + word + " Sentence: " + R4 + " Word: " + R5
+000103	006255 LDA 0,2,13,1
+000104	002652 LDR 1,2,10,1
+000105	014406 AIR 1,6
+000106	060001 TRAP 1
 
-CAND_POST:
-    ; Store parsed value R0 into CAND[IDX] using CADDRS table (two-step addressing)
-    ; R3 = CADDRS base address
-000176	003427     LDR 3,0,CADDRS_LO
-    ; R3 = CADDRS + IDX
-000177	011515     AMR 3,1,13
-    ; CUR_CAND_PTR_LO <- M[CADDRS + IDX] (pointer to CANDi)
-000200	005431     STR 3,0,CUR_CAND_PTR_LO
-000201	003471     LDR 3,0,CUR_CAND_PTR_LO,1
-000202	005431     STR 3,0,CUR_CAND_PTR_LO
-    ; M[CANDi] <- R0
-000203	004071     STR 0,0,CUR_CAND_PTR_LO,1
-000204	026261     JMA 2,17,1
+; Print the word itself
+000107	006242 LDA 0,2,2,1
+000110	002643 LDR 1,2,3,1
+000111	060001 TRAP 1
 
-STORE_C0:
-STORE_C1:
-STORE_C2:
-STORE_C3:
-STORE_C4:
-AFTER_STORE:
-    ; Increment IDX
-000205	002515     LDR 1,1,13
-000206	014401     AIR 1,1
-000207	004515     STR 1,1,13
-    ; Decrement CNT and loop
-000210	003112     LDR 2,1,10
-000211	017001     SIR 2,1
-000212	005112     STR 2,1,10
-000213	023263     JNE 2,2,19,1
+; newline after "Word: <word>"
+000112	003650 LDR 3,2,8,1
+000113	145401 OUT 3,1
 
-READS_DONE:
-; === Read Target using unified parser ===
-    ; MODE=2 (TARGET)
-000214	003120     LDR 2,1,16
-000215	015002     AIR 2,2
-000216	005110     STR 2,1,8
-    ; Reset parser state and jump to RINT_LOOP
-000217	002120     LDR 0,1,16
-000220	002520     LDR 1,1,16
-000221	003120     LDR 2,1,16
-000222	026241     JMA 2,1,1
+; Print " Sentence: "
+000114	006257 LDA 0,2,15,1
+000115	002652 LDR 1,2,10,1
+000116	014413 AIR 1,11
+000117	060001 TRAP 1
 
-CAND_NEXT:
-    ; Continue candidate loop using unified parser
-    ; Reset parser state and set MODE=1
-000223	003120     LDR 2,1,16
-000224	015001     AIR 2,1
-000225	005110     STR 2,1,8
-000226	002120     LDR 0,1,16
-000227	002520     LDR 1,1,16
-000230	003120     LDR 2,1,16
-000231	026241     JMA 2,1,1
+; Print sentence number (saved)
+000120	002265 LDR 0,2,21,1     ; load SENT_NO
+000121	030066 JSR 0,0,PRINT_DEC_PTR,1
 
-T_POST:
-000232	004114     STR 0,1,12
+; newline after "Sentence: <n>"
+000122	003650 LDR 3,2,8,1
+000123	145401 OUT 3,1
 
-; If CNT_INIT == 0 then nothing to compare -> HLT
-000233	003113 LDR 2,1,11
-000234	021350 JZ 2,3,8,1
+; Print " Word: "
+000124	006261 LDA 0,2,17,1
+000125	002652 LDR 1,2,10,1
+000126	014407 AIR 1,7
+000127	060001 TRAP 1
 
-; Compare candidates in a compact loop (IDX 0..CNT_INIT-1)
-    ; Initialize CADDRS_PTR_LO to the candidate-address table base and set MIN_DIFF/WINNER with first candidate
-000235	002027     LDR 0,0,CADDRS_LO
-000236	004030     STR 0,0,CADDRS_PTR_LO
-    ; Load first candidate value via address table pointer (two-step indirection)
-    ; Step 1: R3 <- M[ M[CADDRS_PTR_LO] ] yields pointer to CANDi
-000237	003470     LDR 3,0,CADDRS_PTR_LO,1
-    ; Step 2: store pointer into a low slot and indirect again to fetch the value
-000240	005431     STR 3,0,CUR_CAND_PTR_LO
-000241	003471     LDR 3,0,CUR_CAND_PTR_LO,1
-000242	005517     STR 3,1,15
-000243	002117     LDR 0,1,15
-000244	012114     SMR 0,1,12
-000245	036265     JGE 0,2,21,1
-000246	172000     NOT 0
-000247	014001     AIR 0,1
-MINPOS0:
-000250	004110     STR 0,1,8
-000251	003517     LDR 3,1,15
-000252	005511     STR 3,1,9
+; Print word number (saved)
+000130	002266 LDR 0,2,22,1     ; load WORD_NO
+000131	030066 JSR 0,0,PRINT_DEC_PTR,1
 
-    ; advance address-table pointer to next candidate (CADDRS_PTR_LO = CADDRS_PTR_LO + 1)
-000253	002030     LDR 0,0,CADDRS_PTR_LO
-000254	014001     AIR 0,1
-000255	004030     STR 0,0,CADDRS_PTR_LO
+; Final newline and halt
+000132	003650 LDR 3,2,8,1
+000133	145401 OUT 3,1
+000134	000000 HLT
 
-    ; Set IDX = 1
-000256	002520     LDR 1,1,16
-000257	014401     AIR 1,1
-000260	004515     STR 1,1,13
+NOT_FOUND:
+000135	006263 LDA 0,2,19,1
+000136	002652 LDR 1,2,10,1
+000137	014411 AIR 1,9
+000140	060001 TRAP 1
+000141	003650 LDR 3,2,8,1
+000142	145401 OUT 3,1
+000143	000000 HLT
 
-COMPARE_LOOP:
-    ; If IDX == CNT_INIT -> we're done
-000261	002515     LDR 1,1,13
-000262	012513     SMR 1,1,11
-000263	020740     JZ 1,3,0,1
+; -----------------------------
+; Decimal print subroutine (non-negative R0)
+; Prints decimal representation of R0 using OUT 3,1. Clobbers R0..R3.
+PRINT_DEC:
+    ; Save link register (R3) since JSR stores return address in R3
+000144	005667     STR 3,2,23,1
+    ; If R0 == 0: print '0' and return
+000145	004244     STR 0,2,4,1
+000146	002244     LDR 0,2,4,1
+000147	022067     JNE 0,0,PD_NONZERO_PTR,1
+000150	003647     LDR 3,2,7,1
+000151	145401     OUT 3,1
+    ; Restore link register and return
+000152	003667     LDR 3,2,23,1
+000153	032000     RFS 0
 
-    ; Load next candidate via address table pointer (two-step indirection)
-000264	003470     LDR 3,0,CADDRS_PTR_LO,1
-000265	005431     STR 3,0,CUR_CAND_PTR_LO
-000266	003471     LDR 3,0,CUR_CAND_PTR_LO,1
-000267	005517     STR 3,1,15
-000270	002117     LDR 0,1,15
-000271	026274     JMA 2,28,1
+PD_NONZERO:
+    ; DPTR <- &DIGITS
+000154	007645     LDA 3,2,5,1
+000155	005433     STR 3,0,DPTR_LO
+    ; COUNT <- 0
+000156	003652     LDR 3,2,10,1
+000157	005646     STR 3,2,6,1
+    ; Reload value to convert into R0
+000160	002244     LDR 0,2,4,1
 
-DO_COMPARE:
-    ; R0 contains candidate value; compute absolute difference with TARGET
-000272	012114     SMR 0,1,12
-000273	036275     JGE 0,2,29,1
-000274	172000     NOT 0
-000275	014001     AIR 0,1
-DIFFPOS:
-000276	004107     STR 0,1,7
-    ; If TEMP_DIFF < MIN_DIFF then update
-000277	002510     LDR 1,1,8
-000300	003107     LDR 2,1,7
-000301	013110     SMR 2,1,8
-    ; R2 = TEMP_DIFF - MIN_DIFF
-    ; Tie-breaker: prefer later candidate on equal diff (<=)
-    ; Convert tie (0) into negative by subtracting 1, so only strictly positive skips update
-000302	017001     SIR 2,1
-000303	037276     JGE 2,2,30,1     ; if (TEMP_DIFF - MIN_DIFF - 1) >= 0 => TEMP_DIFF > MIN_DIFF, skip update
-    ; else (negative): Update MIN_DIFF and WINNER (use PRINT_TMP which holds this candidate)
-000304	003107     LDR 2,1,7
-000305	005110     STR 2,1,8
-000306	003517     LDR 3,1,15
-000307	005511     STR 3,1,9
-000310	026277     JMA 2,31,1
-SKIP_UPDATE:
-    ; nothing to do
-CONT_COMPARE:
-    ; Advance address-table pointer and IDX, then loop
-000311	002030     LDR 0,0,CADDRS_PTR_LO
-000312	014001     AIR 0,1
-000313	004030     STR 0,0,CADDRS_PTR_LO
-000314	002515     LDR 1,1,13
-000315	014401     AIR 1,1
-000316	004515     STR 1,1,13
-000317	026266     JMA 2,22,1
+PD_DIV_LOOP:
+    ; Divide R0 by 10: quotient in R0, remainder in R1
+000161	003251     LDR 2,2,9,1
+000162	162200     DVD 0,2
+    ; Convert remainder to ASCII: R1 += '0'
+000163	010647     AMR 1,2,7,1
+    ; Store remainder char at *DPTR using indirect through DPTR_LO
+000164	004473     STR 1,0,DPTR_LO,1
+    ; DPTR++
+000165	003433     LDR 3,0,DPTR_LO
+000166	015401     AIR 3,1
+000167	005433     STR 3,0,DPTR_LO
+    ; COUNT++
+000170	003646     LDR 3,2,6,1
+000171	015401     AIR 3,1
+000172	005646     STR 3,2,6,1
+    ; Continue if quotient != 0
+000173	022070     JNE 0,0,PD_DIV_LOOP_PTR,1
 
-COMP_DONE:
-    ; X3 already points to pointer-table base; no need to reload here
-    ; Full multi-digit print in decimal
-    ; R1 holds |WINNER|, R2=pow, R0 temp; uses READBUF/TEMP_DIFF/PRINT_TMP.
-    ; Handle sign
-000320	002111     LDR 0,1,9
-000321	036341     JGE 0,3,1,1
-000322	003506     LDR 3,1,6
-000323	145401     OUT 3,1
-000324	002511     LDR 1,1,9
-000325	172400     NOT 1
-000326	014401     AIR 1,1
-000327	026342     JMA 3,2,1
-PW_ABS:
-000330	002511     LDR 1,1,9
-PW_ZCHK:
-    ; If R1 == 0 -> print '0'
-000331	012520     SMR 1,1,16
-000332	022743     JNE 1,3,3,1
-000333	003505     LDR 3,1,5
-000334	145401     OUT 3,1
-000335	000000     HLT
+    ; Print digits in reverse
+    ; DPTR-- to last stored char
+000174	003433     LDR 3,0,DPTR_LO
+000175	017401     SIR 3,1
+000176	005433     STR 3,0,DPTR_LO
 
-PW_FINDPOW:
-    ; R2 = 1
-000336	003120     LDR 2,1,16
-000337	015001     AIR 2,1
-PW_POW_LOOP:
-    ; R0 = 10 * R2 (via 8+2)
-000340	005116     STR 2,1,14
-000341	002116     LDR 0,1,14
-000342	062301     SRC 0,1,1,1
-000343	004107     STR 0,1,7       ; TEMP_DIFF = 2*R2
-000344	002116     LDR 0,1,14
-000345	062303     SRC 0,3,1,1             ; R0 = 8*R2
-000346	010107     AMR 0,1,7         ; R0 = 10*R2
-000347	004117     STR 0,1,15
-    ; if (10*R2) <= R1 then R2 = 10*R2 and repeat
-000350	004516     STR 1,1,14         ; save R1
-000351	002116     LDR 0,1,14         ; R0 = R1
-000352	012117     SMR 0,1,15       ; R0 = R1 - 10*R2
-000353	036346     JGE 0,3,6,1
-    ; else proceed with current R2
-000354	026345     JMA 3,5,1
-PW_GROW:
-000355	003117     LDR 2,1,15       ; R2 = 10*R2
-000356	026344     JMA 3,4,1
+PD_PRINT_LOOP:
+    ; Load char at *DPTR and print
+000177	003473     LDR 3,0,DPTR_LO,1
+000200	145401     OUT 3,1
+    ; DPTR--
+000201	003433     LDR 3,0,DPTR_LO
+000202	017401     SIR 3,1
+000203	005433     STR 3,0,DPTR_LO
+    ; COUNT--
+000204	003646     LDR 3,2,6,1
+000205	017401     SIR 3,1
+000206	005646     STR 3,2,6,1
+000207	023471     JNE 3,0,PD_PRINT_LOOP_PTR,1
+    ; Restore link register and return
+000210	003667     LDR 3,2,23,1
+000211	032000     RFS 0
 
-PW_PRINT:
-    ; loop: quotient = R1 / R2; remainder = R1 % R2
-PW_PRINT_LOOP:
-000357	005117     STR 2,1,15       ; save pow
-000360	004516     STR 1,1,14         ; save R1
-000361	002116     LDR 0,1,14         ; R0 = R1
-000362	003117     LDR 2,1,15       ; R2 = pow
-000363	162200     DVD 0,2               ; R0=quotient digit, R2=remainder
-000364	004107     STR 0,1,7       ; save digit
-    ; After DVD 0,2: quotient is in R0, remainder is in R1 (not R2)
-000365	004516     STR 1,1,14         ; save remainder
-000366	002516     LDR 1,1,14         ; R1 = remainder
-    ; pow = pow / 10
-000367	003117     LDR 2,1,15       ; reload pow
-000370	002120     LDR 0,1,16
-000371	014012     AIR 0,10
-000372	163000     DVD 2,0               ; R2 = pow / 10
-    ; print the saved digit
-000373	002107     LDR 0,1,7
-000374	004117     STR 0,1,15
-000375	003505     LDR 3,1,5
-000376	011517     AMR 3,1,15
-000377	145401     OUT 3,1
-    ; Continue if pow != 0
-000400	013120     SMR 2,1,16
-000401	023347     JNE 2,3,7,1
-000402	000000     HLT
-
-HALT_NOW:
-000403	000000     HLT
-
-; --- Low constants for index bases (must be <=31) ---
+; -----------------------------
+; Low constants and pointer cells (must be <= 31)
 LOC 20
-000024	000764 DBASE_LO: Data 500
-000025	000454 PTBASE1_LO: Data 300
-000026	000524 PTBASE2_LO: Data 340
-000027	001024 CADDRS_LO: Data CADDRS
-000030	000000 CADDRS_PTR_LO: Data 0
-000031	000000 CUR_CAND_PTR_LO: Data 0
+000024	000764 DBASE_LO:       Data 500
+000025	000454 PTBASE1_LO:     Data 300
+000026	000144 PRINT_DEC_PTR:  Data PRINT_DEC
+000027	000154 PD_NONZERO_PTR: Data PD_NONZERO
+000030	000161 PD_DIV_LOOP_PTR: Data PD_DIV_LOOP
+000031	000177 PD_PRINT_LOOP_PTR: Data PD_PRINT_LOOP
+000032	000135 NOT_FOUND_PTR:  Data NOT_FOUND
+000033	000000 DPTR_LO:        Data 0
 
-; --- Pointer Tables (placed in higher memory; accessed via X2/X3 with I=1) ---
-LOC 300
-000454	000053 PTR_ENTRY: Data ENTRY
-000455	000072 PTR_RINT_LOOP: Data RINT_LOOP
-000456	000102 PTR_RINT_CHECK_SIGN: Data RINT_CHECK_SIGN
-000457	000075 PTR_RINT_DIGIT_CHECK: Data RINT_DIGIT_CHECK
-000460	000111 PTR_RINT_GE_ZERO: Data RINT_GE_ZERO
-000461	000106 PTR_RINT_SET_NEG: Data RINT_SET_NEG
-000462	000130 PTR_RINT_NOT_DIGIT: Data RINT_NOT_DIGIT
-000463	000131 PTR_RINT_DONE: Data RINT_DONE
-000464	000134 PTR_RINT_POS: Data RINT_POS
-000465	000141 PTR_N_POST: Data N_POST
-000466	000161 PTR_N_CAP: Data N_CAP
-000467	000176 PTR_CAND_POST: Data CAND_POST
-000470	000205 PTR_STORE_C0: Data STORE_C0
-000471	000205 PTR_STORE_C1: Data STORE_C1
-000472	000205 PTR_STORE_C2: Data STORE_C2
-000473	000205 PTR_STORE_C3: Data STORE_C3
-000474	000205 PTR_STORE_C4: Data STORE_C4
-000475	000205 PTR_AFTER_STORE: Data AFTER_STORE
-000476	000214 PTR_READS_DONE: Data READS_DONE
-000477	000223 PTR_CAND_NEXT: Data CAND_NEXT
-000500	000232 PTR_T_POST: Data T_POST
-000501	000250 PTR_MINPOS0: Data MINPOS0
-000502	000261 PTR_COMPARE_LOOP: Data COMPARE_LOOP
-000503	000261 PTR_LOAD_C0: Data COMPARE_LOOP
-000504	000261 PTR_LOAD_C1: Data COMPARE_LOOP
-000505	000261 PTR_LOAD_C2: Data COMPARE_LOOP
-000506	000261 PTR_LOAD_C3: Data COMPARE_LOOP
-000507	000261 PTR_LOAD_C4: Data COMPARE_LOOP
-000510	000272 PTR_DO_COMPARE: Data DO_COMPARE
-000511	000276 PTR_DIFFPOS: Data DIFFPOS
-000512	000311 PTR_SKIP_UPDATE: Data SKIP_UPDATE
-000513	000311 PTR_CONT_COMPARE: Data CONT_COMPARE
-
-LOC 340
-000524	000320 PTR_COMP_DONE: Data COMP_DONE
-000525	000330 PTR_PW_ABS: Data PW_ABS
-000526	000331 PTR_PW_ZCHK: Data PW_ZCHK
-000527	000336 PTR_PW_FINDPOW: Data PW_FINDPOW
-000530	000340 PTR_PW_POW_LOOP: Data PW_POW_LOOP
-000531	000357 PTR_PW_PRINT: Data PW_PRINT
-000532	000355 PTR_PW_GROW: Data PW_GROW
-000533	000357 PTR_PW_PRINT_LOOP: Data PW_PRINT_LOOP
-000534	000403 PTR_HALT_NOW: Data HALT_NOW
-
-; --- Data ---
-; IMPORTANT: Place data at 500 (decimal) to avoid overlapping pointer table 1 (300..331).
+; -----------------------------
+; Data section
 LOC 500
-; Candidate storage (initially zero)
-000764	177716 CAND0: Data 65486    ; -50 (16-bit two's complement)
-000765	177747 CAND1: Data 65511    ; -25
-000766	177766 CAND2: Data 65526    ; -10
-000767	177773 CAND3: Data 65531    ; -5
-000770	177777 CAND4: Data 65535    ; -1
+; Small variables and constants (kept separate from large buffers)
+000764	000000 PARA_LEN:   Data 0
+000765	000000 WORD_LEN:   Data 0
+000766	000000 TEMP:       Data 0
+000767	000000 DIGITS:     Data 0
+000770	000000             Data 0
+000771	000000             Data 0
+000772	000000             Data 0
+000773	000000             Data 0
+000774	000000             Data 0
+000775	000000             Data 0
+000776	000000             Data 0
+000777	000000             Data 0
+001000	000000             Data 0
+001001	000000 DIGCOUNT:   Data 0
 
-; ASCII constants
-000771	000060 ASCII_0: Data 48
-000772	000055 ASCII_MINUS: Data 45
+; Constants and strings
+001002	000060 ASCII_0:    Data 48
+001003	000012 ASCII_NL:   Data 10
+001004	000012 TEN:        Data 10
+001005	000000 ZERO:       Data 0
 
-; Working data (initialized to zero)
-000773	000000 TEMP_DIFF: Data 0
-000774	000000 MIN_DIFF: Data 0
-000775	000000 WINNER: Data 0
-000776	000000 CNT: Data 0
-000777	000000 CNT_INIT: Data 0
-001000	000000 TARGET: Data 0
-001001	000000 IDX: Data 0
+; Saved results
+001006	000000 SENT_NO:    Data 0
+001007	000000 WORD_NO:    Data 0
+001010	000000 R3_SAVE:    Data 0
 
-001002	000000 READBUF: Data 0
-001003	000000 PRINT_TMP: Data 0
-001004	000000 ZERO: Data 0
+001011	000105 PROMPT:     Data 69   ; 'E'
+001012	000156             Data 110  ; 'n'
+001013	000164             Data 116  ; 't'
+001014	000145             Data 101  ; 'e'
+001015	000162             Data 114  ; 'r'
+001016	000040             Data 32   ; ' '
+001017	000167             Data 119  ; 'w'
+001020	000157             Data 111  ; 'o'
+001021	000162             Data 114  ; 'r'
+001022	000144             Data 100  ; 'd'
+001023	000072             Data 58   ; ':'
+001024	000040             Data 32   ; ' '
+001025	000014 PROMPT_LEN: Data 12
 
-; Scratch for advancing X3 pointer through CADDRS
+001026	000127 WORD_LABEL:     Data 87   ; 'W'
+001027	000157                 Data 111  ; 'o'
+001030	000162                 Data 114  ; 'r'
+001031	000144                 Data 100  ; 'd'
+001032	000072                 Data 58   ; ':'
+001033	000040                 Data 32   ; ' '
+001034	000006 WORD_LABEL_LEN: Data 6
 
-; Additional static candidates to total 20
-001005	000000 CAND5:  Data 0
-001006	000001 CAND6:  Data 1
-001007	000002 CAND7:  Data 2
-001010	000003 CAND8:  Data 3
-001011	000004 CAND9:  Data 4
-001012	000005 CAND10: Data 5
-001013	000012 CAND11: Data 10
-001014	000031 CAND12: Data 25
-001015	000062 CAND13: Data 50
-001016	000144 CAND14: Data 100
-001017	000310 CAND15: Data 200
-001020	000454 CAND16: Data 300
-001021	000620 CAND17: Data 400
-001022	000764 CAND18: Data 500
-001023	001750 CAND19: Data 1000
+001035	000040 SENT_LABEL:     Data 32   ; ' '
+001036	000123                 Data 83   ; 'S'
+001037	000145                 Data 101  ; 'e'
+001040	000156                 Data 110  ; 'n'
+001041	000164                 Data 116  ; 't'
+001042	000145                 Data 101  ; 'e'
+001043	000156                 Data 110  ; 'n'
+001044	000143                 Data 99   ; 'c'
+001045	000145                 Data 101  ; 'e'
+001046	000072                 Data 58   ; ':'
+001047	000040                 Data 32   ; ' '
+001050	000013 SENT_LABEL_LEN: Data 11
 
-; Table of candidate addresses (20 entries)
-CADDRS:
-001024	000764     Data CAND0
-001025	000765     Data CAND1
-001026	000766     Data CAND2
-001027	000767     Data CAND3
-001030	000770     Data CAND4
-001031	001005     Data CAND5
-001032	001006     Data CAND6
-001033	001007     Data CAND7
-001034	001010     Data CAND8
-001035	001011     Data CAND9
-001036	001012     Data CAND10
-001037	001013     Data CAND11
-001040	001014     Data CAND12
-001041	001015     Data CAND13
-001042	001016     Data CAND14
-001043	001017     Data CAND15
-001044	001020     Data CAND16
-001045	001021     Data CAND17
-001046	001022     Data CAND18
-001047	001023     Data CAND19
+001051	000040 WORDNUM_LABEL:     Data 32   ; ' '
+001052	000127                    Data 87   ; 'W'
+001053	000157                    Data 111  ; 'o'
+001054	000162                    Data 114  ; 'r'
+001055	000144                    Data 100  ; 'd'
+001056	000072                    Data 58   ; ':'
+001057	000040                    Data 32   ; ' '
+001060	000007 WORDNUM_LABEL_LEN: Data 7
 
-; End
+001061	000116 NOTFOUND:     Data 78  ; 'N'
+001062	000157               Data 111 ; 'o'
+001063	000164               Data 116 ; 't'
+001064	000040               Data 32  ; ' '
+001065	000146               Data 102 ; 'f'
+001066	000157               Data 111 ; 'o'
+001067	000165               Data 117 ; 'u'
+001070	000156               Data 110 ; 'n'
+001071	000144               Data 100 ; 'd'
+001072	000011 NOTFOUND_LEN: Data 9
+
+; Large buffers placed away from constants to avoid overlap with TRAP 0 writes
+LOC 700
+001274	000000 PARA_BUF:   Data 0
+
+LOC 900
+001604	000000 WORD_BUF:   Data 0
+
+; Pointer table for far addressing (IX=2 with I=1)
+LOC 300
+000454	001274 PTR_PARA_BUF:        Data PARA_BUF
+000455	000764 PTR_PARA_LEN:        Data PARA_LEN
+000456	001604 PTR_WORD_BUF:        Data WORD_BUF
+000457	000765 PTR_WORD_LEN:        Data WORD_LEN
+000460	000766 PTR_TEMP:            Data TEMP
+000461	000767 PTR_DIGITS:          Data DIGITS
+000462	001001 PTR_DIGCOUNT:        Data DIGCOUNT
+000463	001002 PTR_ASCII_0:         Data ASCII_0
+000464	001003 PTR_ASCII_NL:        Data ASCII_NL
+000465	001004 PTR_TEN:             Data TEN
+000466	001005 PTR_ZERO:            Data ZERO
+000467	001011 PTR_PROMPT:          Data PROMPT
+000470	001025 PTR_PROMPT_LEN:      Data PROMPT_LEN
+000471	001026 PTR_WORD_LABEL:      Data WORD_LABEL
+000472	001034 PTR_WORD_LABEL_LEN:  Data WORD_LABEL_LEN
+000473	001035 PTR_SENT_LABEL:      Data SENT_LABEL
+000474	001050 PTR_SENT_LABEL_LEN:  Data SENT_LABEL_LEN
+000475	001051 PTR_WORDNUM_LABEL:   Data WORDNUM_LABEL
+000476	001060 PTR_WORDNUM_LABEL_LEN: Data WORDNUM_LABEL_LEN
+000477	001061 PTR_NOTFOUND:        Data NOTFOUND
+000500	001072 PTR_NOTFOUND_LEN:    Data NOTFOUND_LEN
+000501	001006 PTR_SENT_NO:         Data SENT_NO
+000502	001007 PTR_WORD_NO:         Data WORD_NO
+000503	001010 PTR_R3_SAVE:         Data R3_SAVE
