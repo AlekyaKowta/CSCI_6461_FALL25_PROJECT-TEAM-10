@@ -5,6 +5,7 @@ import src.main.java.core.MachineState;
 import src.main.java.core.cache.Cache;
 import src.main.java.core.cache.Cache.Snapshot;
 
+
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -12,6 +13,8 @@ import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.File;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.io.IOException;
 
 /**
@@ -68,9 +71,9 @@ public class SimulatorUI extends JFrame {
     private javax.swing.JTextPane cacheContentArea;
     private JTextArea printerArea;
     private JTextField consoleInputField;
+    private JTextArea compactOutputArea;
 
-    private JTextField outputField;
-
+    // Cache stats labels
     private JLabel cacheHitsLbl, cacheMissesLbl, cacheReadLbl, cacheWriteLbl;
 
 
@@ -96,7 +99,6 @@ public class SimulatorUI extends JFrame {
         } else {
             // Minimal components to satisfy controller interactions in tests
             this.printerArea = new JTextArea();
-            this.outputField = new JTextField();
             this.consoleInputField = new JTextField();
             this.octalInputField = new JTextField("000000", 6);
             this.binaryInputField = new JTextField("0000000000000000", 20);
@@ -446,81 +448,63 @@ public class SimulatorUI extends JFrame {
         JPanel p = new JPanel();
         p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
         p.setBackground(LIGHT_BLUE);
-        p.setBorder(BorderFactory.createTitledBorder("Cache Area Content"));
+        p.setBorder(BorderFactory.createTitledBorder("Console / Cache / Output"));
 
-        // Cache Content Area
+        // --- Cache Content Area (styled) ---
         cacheContentArea = new javax.swing.JTextPane();
         cacheContentArea.setEditable(false);
         cacheContentArea.setBorder(BorderFactory.createTitledBorder("Cache Lines"));
         cacheContentArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         JScrollPane cacheScroll = new JScrollPane(cacheContentArea);
-        // make it a bit taller & narrower
-        cacheScroll.setPreferredSize(new Dimension(260, 220));
+        // tweak size so everything fits nicely on the right side
+        cacheScroll.setPreferredSize(new Dimension(260, 200));
         p.add(cacheScroll);
 
-        // Cache Stats Row (hits/misses)
-        JPanel stats = new JPanel(new GridLayout(2, 2, 6, 2));
-        stats.setBackground(Color.WHITE);
-        stats.setBorder(BorderFactory.createTitledBorder("Cache Stats"));
-
+        // --- Cache Stats Row ---
+        JPanel stats = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 5));
+        stats.setBackground(LIGHT_BLUE);
         cacheHitsLbl   = new JLabel("Hits: 0");
         cacheMissesLbl = new JLabel("Misses: 0");
         cacheReadLbl   = new JLabel("R  H/M: 0 / 0");
         cacheWriteLbl  = new JLabel("W  H/M: 0 / 0");
-
         stats.add(cacheHitsLbl);
         stats.add(cacheMissesLbl);
         stats.add(cacheReadLbl);
         stats.add(cacheWriteLbl);
-
         p.add(stats);
 
-        // Console Printer Area
-        printerArea = new JTextArea(8, 24);
+        // --- Printer Area (for OUT / TRAP 1 logs) ---
+        printerArea = new JTextArea(8, 30);
         printerArea.setEditable(false);
         printerArea.setBorder(BorderFactory.createTitledBorder("Printer"));
-        p.add(new JScrollPane(printerArea));
+        JScrollPane printerScroll = new JScrollPane(printerArea);
+        printerScroll.setPreferredSize(new Dimension(260, 120));
+        p.add(printerScroll);
 
-        JPanel ioRow = new JPanel(new GridLayout(1, 2, 10, 0));
-        ioRow.setBackground(LIGHT_BLUE);
-
-        // Console Input Field
-        consoleInputField = new JTextField(20);
+        // --- Console Input (used by IN instruction) ---
         JPanel inputWrap = new JPanel(new BorderLayout(5, 5));
         inputWrap.setBackground(LIGHT_BLUE);
         inputWrap.setBorder(BorderFactory.createTitledBorder("Console Input"));
+        consoleInputField = new JTextField(20);
         inputWrap.add(consoleInputField, BorderLayout.CENTER);
+        p.add(inputWrap);
 
-        // Console Output Field
-        outputField = new JTextField(20);
-        outputField.setEditable(false);
-        JPanel outputWrap = new JPanel(new BorderLayout(5, 5));
-        outputWrap.setBackground(LIGHT_BLUE);
-        outputWrap.setBorder(BorderFactory.createTitledBorder("Console Output"));
-        outputWrap.add(outputField, BorderLayout.CENTER);
+        // --- Compact Output Area (paragraph result only) ---
+        compactOutputArea = new JTextArea(4, 30);
+        compactOutputArea.setEditable(false);
+        compactOutputArea.setBorder(BorderFactory.createTitledBorder("Compact Output"));
+        JScrollPane compactScroll = new JScrollPane(compactOutputArea);
+        compactScroll.setPreferredSize(new Dimension(260, 80));
+        p.add(compactScroll);
 
-        ioRow.add(inputWrap);
-        ioRow.add(outputWrap);
-        p.add(ioRow);
+        // --- Refresh Output Button (rebuilds Compact Output from printer log) ---
+        JButton refreshOutputBtn = new JButton("Refresh Output");
+        refreshOutputBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        refreshOutputBtn.addActionListener(e -> refreshCompactOutput());
+        p.add(refreshOutputBtn);
 
         return p;
     }
-
-    public void clearConsoleOutput() {
-        if (outputField != null) outputField.setText("");
-    }
-
-    public void setConsoleOutput(String text) {
-        if (outputField != null) outputField.setText(text);
-    }
-
-    public void appendConsoleOutput(String text) {
-        if (outputField != null) {
-            String cur = outputField.getText();
-            outputField.setText((cur == null ? "" : cur) + text);
-        }
-    }
-
 
     // Public getter for the printer area (used by the Controller)
     public JTextArea getPrinterArea() {
@@ -578,6 +562,7 @@ public class SimulatorUI extends JFrame {
         octalInputField.setText(String.format("%06o", octalValue));
         binaryInputField.setText(String.format("%16s", Integer.toBinaryString(octalValue)).replace(' ', '0'));
 
+        // Update cache content and stats
         cacheContentArea.setText(state.getCache().getCacheStateString());
         Cache c = state.getCache();
         cacheHitsLbl.setText("Hits: "   + c.getTotalHits());
@@ -646,7 +631,6 @@ public class SimulatorUI extends JFrame {
         cacheContentArea.setDocument(doc);
     }
 
-
     // --- IPL Button Action Handlers ---
 
     private void handleIPL(ActionEvent e) {
@@ -687,5 +671,19 @@ public class SimulatorUI extends JFrame {
     // --- Main Method to run the UI ---
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> new SimulatorUI());
+    }
+
+    // --- Compact Output Extraction ---
+    private void refreshCompactOutput() {
+        String log = printerArea.getText();
+        // Extract characters printed by OUT 3,1 (and TRAP 1) in a compact view
+        // Pattern matches -> OUT Printer: '<char>' where char may include newline
+        Pattern pattern = Pattern.compile("-> OUT Printer: '([^']*)'", Pattern.DOTALL);
+        Matcher matcher = pattern.matcher(log);
+        StringBuilder sb = new StringBuilder();
+        while (matcher.find()) {
+            sb.append(matcher.group(1));
+        }
+        compactOutputArea.setText(sb.toString());
     }
 }
