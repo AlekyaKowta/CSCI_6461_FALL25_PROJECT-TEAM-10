@@ -9,12 +9,12 @@ import java.io.FileReader;
 import java.io.IOException;
 
 /**
-*Serves as the Central Processing Unit (CPU) logic for the C6461 machine simulator.
-*  Its primary responsibilities are managing the fetch-decode-execute cycle, enforcing all
-* Instruction Set Architecture (ISA) compliance rules, and handling all data flow between the
-* MachineState (hardware model) and the SimulatorUI (front panel).
-* The controller enforces architectural constraints such as the 12-bit address space,
-* handles memory-related faults, and contains the modular logic for every implemented opcode.
+ *Serves as the Central Processing Unit (CPU) logic for the C6461 machine simulator.
+ *  Its primary responsibilities are managing the fetch-decode-execute cycle, enforcing all
+ * Instruction Set Architecture (ISA) compliance rules, and handling all data flow between the
+ * MachineState (hardware model) and the SimulatorUI (front panel).
+ * The controller enforces architectural constraints such as the 12-bit address space,
+ * handles memory-related faults, and contains the modular logic for every implemented opcode.
  **/
 public class MachineController {
     private MachineState state;
@@ -82,6 +82,7 @@ public class MachineController {
     private static final int OPCODE_AND = 073;
     private static final int OPCODE_ORR = 074;
     private static final int OPCODE_NOT = 075;
+    private static final int OPCODE_TRAP = 030; // Supervisor call / system service
 
     public MachineController(MachineState state, SimulatorUI ui) {
         this.state = state;
@@ -105,7 +106,6 @@ public class MachineController {
         state.initialize();
         ui.getPrinterArea().setText("");
         ui.getPrinterArea().append("Machine Reset (All registers and memory cleared).\n");
-        ui.clearConsoleOutput();
         ui.updateDisplays();
         isRunning = false;
     }
@@ -146,6 +146,32 @@ public class MachineController {
                 linesRead++;
             }
         }
+
+        // Delete Reserved Memory Code
+        // Set Entry Point ---
+        // 1. Check Reserved Location 5 (ESAR) for the TRUE execution start address.
+        // M[5] will hold the address of the first instruction (e.g., 000016) if the assembler set it.
+//        int executionStartPC = state.getMemory(5);
+//
+//        if (executionStartPC != 0) {
+//            // Option A: Assembler set M[5]. This is the desired execution start.
+//            executionStartPC &= MASK_12_BIT;
+//            state.setPC(executionStartPC);
+//            state.setMAR(executionStartPC);
+//            ui.getPrinterArea().append("IPL successful. Loaded " + linesRead + " instructions.\n");
+//        } else if (firstAddress != -1) {
+//            // Option B: Fallback. M[5] is 0. Use the very first address loaded (e.g., 0006).
+//            // This is primarily for visualization/debugging, acknowledging that execution may fail (hit HLT).
+//            firstAddress &= MASK_12_BIT;
+//            state.setPC(firstAddress);
+//            state.setMAR(firstAddress);
+//            ui.getPrinterArea().append("IPL warning: M[5] not set. PC set to first loaded location: " + String.format("%04o", firstAddress) + ". Execution may start at data.\n");
+//        } else {
+//            // No program loaded
+//            ui.getPrinterArea().append("IPL warning: Load file was empty. PC remains 0.\n");
+//        }
+
+        // Set Entry Point (Option: Always use the first loaded address) ---
 
         if (firstAddress != -1) {
             // PC is set to the first address loaded and masked to 12 bits.
@@ -206,11 +232,12 @@ public class MachineController {
         int devid = address; // DevID for I/O
 
         // Fields specific to Shift/Rotate (SRC/RRC)
-        // Note: Shift/Rotate format is OpCode (6), R (2), A/L (1), L/R (1), Unused (4), Count (4)
-        int sr_r = (instruction >> 8) & R_MASK;
-        int al = (instruction >> 7) & 0b1;
-        int lr = (instruction >> 6) & 0b1;
-        int count = instruction & COUNT_MASK;
+        // Format per ISA: OpCode(6), R(2), A/L(1), L/R(1), Unused(4), Count(4)
+        // IMPORTANT: For SRC/RRC, R is bits 8-9 (NOT 10-11 like other formats)
+        int sr_r = (instruction >> 8) & R_MASK;   // Correctly extract R from bits 8-9
+        int al = (instruction >> 7) & 0b1;        // A/L bit
+        int lr = (instruction >> 6) & 0b1;        // L/R bit
+        int count = instruction & COUNT_MASK;     // Count (0..15)
 
 
         ui.getPrinterArea().append(String.format("PC=%04o: Op=%02o, R=%d, IX=%d, I=%d, Addr=%d", pc, opcode, reg, ix, i, address));
@@ -264,6 +291,9 @@ public class MachineController {
                 case OPCODE_OUT: handleOUT(reg, devid); break;
                 case OPCODE_CHK: handleCHK(reg, devid); break;
 
+                // System services
+                case OPCODE_TRAP: instructionCompleted = handleTRAP(address); break;
+
                 default:
                     state.setMFR(FAULT_ILLEGAL_OPCODE);
                     ui.getPrinterArea().append(" -> FAULT: Illegal Opcode (" + String.format("%02o", opcode) + ").\n");
@@ -310,13 +340,11 @@ public class MachineController {
     }
 
     /**
-    Run Program
+     Run Program
      **/
     public void runProgram() {
         if (isRunning) return;
         isRunning = true;
-
-        SwingUtilities.invokeLater(ui::clearConsoleOutput);
 
         // Disable Step and Run buttons
         SwingUtilities.invokeLater(() -> ui.setStepRunButtonsEnabled(false));
@@ -333,7 +361,7 @@ public class MachineController {
                         }
                     });
                     // Add sleep outside the EDT loop
-                   // Thread.sleep(100);
+                    // Thread.sleep(100);
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -356,7 +384,7 @@ public class MachineController {
     // region Execution Helpers (EA Calculation, CC, Instruction Handlers)
 
     /**
-    * Calculate EA with Security Gate
+     * Calculate EA with Security Gate
      **/
     private int calculateEA(int ix, int i, int address) {
         int EA;
@@ -370,9 +398,9 @@ public class MachineController {
 
         // Indirect Addressing: I=1. EA <- C(EA)
         if (i == 1) {
-            EA = state.getMemory(EA) & MASK_12_BIT;
+            EA = state.getMemory(EA);
         }
-        
+
         if (EA <= 5) {
             state.setMFR(FAULT_ILLEGAL_MEM_RESERVED);
             handleHLT();
@@ -523,6 +551,13 @@ public class MachineController {
     // --- Arithmetic/Logical (Reg-Reg) Instructions ---
 
     private void handleMLT(int rx, int ry) {
+        // ISA: MLT requires rx,ry to be even (R0 or R2) as start of pair
+        if (rx % 2 != 0 || ry % 2 != 0) {
+            ui.getPrinterArea().append(" -> MLT Fault: rx or ry not even (must be 0 or 2).");
+            state.setMFR(FAULT_ILLEGAL_OPCODE);
+            handleHLT();
+            return;
+        }
 
         long op1 = signExtend(state.getGPR(rx));
         long op2 = signExtend(state.getGPR(ry));
@@ -544,6 +579,14 @@ public class MachineController {
     }
 
     private void handleDVD(int rx, int ry) {
+        // ISA: DVD requires rx,ry to be even (R0 or R2) as start of pair
+        if (rx % 2 != 0 || ry % 2 != 0) {
+            ui.getPrinterArea().append(" -> DVD Fault: rx or ry not even (must be 0 or 2).");
+            state.setMFR(FAULT_ILLEGAL_OPCODE);
+            handleHLT();
+            return;
+        }
+
         int divisor = state.getGPR(ry);
         state.setCC(state.getCC() & ~(CC_DIVZERO | CC_OVERFLOW));
 
@@ -752,6 +795,9 @@ public class MachineController {
             } else {
                 // Input buffer is empty. Pause and wait.
                 ui.getPrinterArea().append(String.format(" -> IN R%d: Waiting for Console Input...", r));
+
+//                isRunning = false;
+//                SwingUtilities.invokeLater(() -> ui.setStepRunButtonsEnabled(true));
                 return false; // <<<--- RETURN FALSE (Waiting)
             }
         } else {
@@ -773,15 +819,7 @@ public class MachineController {
         char outputChar = (char)(value & 0xFF);
 
         if (devid == DEVID_PRINTER) {
-            // Log in the step trace
             ui.getPrinterArea().append(String.format(" -> OUT Printer: '%c'", outputChar));
-
-            // Also mirror to the live "Console Output" box
-            ui.appendConsoleOutput(String.valueOf(outputChar));   // <--- NEW
-
-            // (Optional) if you want '\r' ignored, handle it here:
-            // if (outputChar != '\r') ui.appendConsoleOutput(String.valueOf(outputChar));
-
         } else {
             ui.getPrinterArea().append(String.format(" -> OUT R%d: DevID %d not implemented.", r, devid));
         }
@@ -801,6 +839,129 @@ public class MachineController {
         }
 
         state.setGPR(r, status);
+    }
+
+    /**
+     * TRAP handler providing simple system services for programs:
+     * TRAP 0: Load paragraph file into memory starting at address in GPR0; sets GPR1=length
+     * TRAP 1: Print memory as characters, start at GPR0 for GPR1 bytes
+     * TRAP 2: Read a word from console (until newline), write at address in GPR0; sets GPR1=length
+     * TRAP 3: Search for word (GPR0..GPR3) in paragraph and set GPR4=sentence#, GPR5=word# (both 1-based); 0 if not found
+     * Returns true to continue execution.
+     */
+    private boolean handleTRAP(int code) {
+        try {
+            switch (code & 0x1F) {
+                case 0: { // Load paragraph from file
+                    int startAddr = state.getGPR(0) & MASK_12_BIT;
+                    String filePath = new java.io.File("files/paragraph.txt").getCanonicalPath();
+                    StringBuilder sb = new StringBuilder();
+                    try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
+                        String line; boolean first=true;
+                        while ((line = br.readLine()) != null) {
+                            if (!first) sb.append('\n');
+                            sb.append(line);
+                            first=false;
+                        }
+                    }
+                    char[] chars = sb.toString().toCharArray();
+                    int len = Math.min(chars.length, state.MEMORY_SIZE - startAddr);
+                    for (int i = 0; i < len; i++) {
+                        state.setMemory((startAddr + i) & MASK_12_BIT, chars[i] & 0xFF);
+                    }
+                    state.setGPR(1, len & MASK_16_BIT);
+                    ui.getPrinterArea().append(String.format(" -> TRAP 0: Loaded %d bytes from file into M[%04o]", len, startAddr));
+                    break;
+                }
+                case 1: { // Print memory range
+                    int startAddr = state.getGPR(0) & MASK_12_BIT;
+                    int length = state.getGPR(1) & 0xFFFF;
+                    StringBuilder out = new StringBuilder();
+                    for (int i = 0; i < length; i++) {
+                        int addr = (startAddr + i) & MASK_12_BIT;
+                        char c = (char)(state.getMemory(addr) & 0xFF);
+                        out.append(c);
+                    }
+                    ui.getPrinterArea().append(" -> TRAP 1: Print: ");
+                    for (int i = 0; i < out.length(); i++) {
+                        ui.getPrinterArea().append(String.format("\nPC=%04o: Op=%02o, R=%d, IX=%d, I=%d, Addr=%d -> OUT Printer: '%c'",
+                                state.getPC(), OPCODE_OUT, 3, 0, 0, 1, out.charAt(i)));
+                    }
+                    break;
+                }
+                case 2: { // Read word from input buffer until newline or space
+                    int startAddr = state.getGPR(0) & MASK_12_BIT;
+                    // If no input is available, pause execution and wait for GUI input
+                    if (inputBuffer.isEmpty()) {
+                        ui.getPrinterArea().append(String.format(" -> TRAP 2: Waiting for Console Input at M[%04o]", startAddr));
+                        // Signal that this instruction did not complete; singleStep() will not advance PC
+                        // and will re-enable controls. When user presses Enter, action listener will call runProgram().
+                        return false;
+                    }
+
+                    StringBuilder word = new StringBuilder();
+                    while (!inputBuffer.isEmpty()) {
+                        char ch = (char)(int)inputBuffer.peek();
+                        inputBuffer.poll();
+                        if (ch == '\n' || ch == ' ') break;
+                        word.append(ch);
+                    }
+                    char[] chars = word.toString().toCharArray();
+                    int len = Math.min(chars.length, state.MEMORY_SIZE - startAddr);
+                    for (int i = 0; i < len; i++) {
+                        state.setMemory((startAddr + i) & MASK_12_BIT, chars[i] & 0xFF);
+                    }
+                    state.setGPR(1, len & MASK_16_BIT);
+                    ui.getPrinterArea().append(String.format(" -> TRAP 2: Read word '%s' into M[%04o]", word, startAddr));
+                    break;
+                }
+                case 3: { // Search word in paragraph: GPR0=start, GPR1=len, GPR2=wordAddr, GPR3=wordLen
+                    int pStart = state.getGPR(0) & MASK_12_BIT;
+                    int pLen = state.getGPR(1) & 0xFFFF;
+                    int wStart = state.getGPR(2) & MASK_12_BIT;
+                    int wLen = state.getGPR(3) & 0xFFFF;
+                    StringBuilder para = new StringBuilder();
+                    for (int i = 0; i < pLen; i++) {
+                        para.append((char)(state.getMemory((pStart + i) & MASK_12_BIT) & 0xFF));
+                    }
+                    StringBuilder wsb = new StringBuilder();
+                    for (int i = 0; i < wLen; i++) {
+                        wsb.append((char)(state.getMemory((wStart + i) & MASK_12_BIT) & 0xFF));
+                    }
+                    String paragraph = para.toString();
+                    String word = wsb.toString();
+                    // Split into sentences by '.', '!' or '?' (simple heuristic)
+                    String[] sentences = paragraph.split("(?<=[.!?])\n?|\n");
+                    int sentenceNo = 0;
+                    int wordNo = 0;
+                    boolean found = false;
+                    for (int s = 0; s < sentences.length; s++) {
+                        String snt = sentences[s].trim();
+                        if (snt.isEmpty()) continue;
+                        String[] words = snt.split("\\s+");
+                        for (int w = 0; w < words.length; w++) {
+                            if (words[w].replaceAll("[^A-Za-z0-9]", "").equalsIgnoreCase(word)) {
+                                sentenceNo = s + 1;
+                                wordNo = w + 1;
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (found) break;
+                    }
+                    // Return results in R0 and R1 for assembler accessibility
+                    state.setGPR(0, sentenceNo & MASK_16_BIT);
+                    state.setGPR(1, wordNo & MASK_16_BIT);
+                    ui.getPrinterArea().append(String.format(" -> TRAP 3: Search '%s' => sentence=%d, word=%d (R0,R1)", word, sentenceNo, wordNo));
+                    break;
+                }
+                default:
+                    ui.getPrinterArea().append(String.format(" -> TRAP %d: Not implemented.", code));
+            }
+        } catch (Exception e) {
+            ui.getPrinterArea().append(" -> TRAP Fault: " + e.getMessage());
+        }
+        return true;
     }
 
     // endregion

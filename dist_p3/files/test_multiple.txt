@@ -1,0 +1,372 @@
+; ===== C461 Assembler Program =====
+; Program 1, Step 2 (print ONLY the closest number)
+; Reads 3 full-range integers (-32768..32767), then a target.
+; Prints: <closest>\n  (to Printer device 1)
+; Uses X1 as a base (32) for all far jumps/calls.
+
+; ===== Low memory (Data, 6..31) =====
+LOC 6
+NUM1:        Data 0    ; 6
+NUM2:        Data 0    ; 7
+NUM3:        Data 0    ; 8
+TARGET:      Data 0    ; 9
+DIFF1:       Data 0    ; 10
+DIFF2:       Data 0    ; 11
+DIFF3:       Data 0    ; 12
+CURVAL:      Data 0    ; 13
+CURDIFF:     Data 0    ; 14
+TMP:         Data 0    ; 15
+RETVAL:      Data 0    ; 16
+RET_ADDR:    Data 0    ; 17  ; READINT return
+TMP2:        Data 0    ; 18
+TMP3:        Data 0    ; 19
+SIGN_MEM:    Data 0    ; 20
+TMP_DIGIT:   Data 0    ; 21
+ACCUM_MULT:  Data 0    ; 22
+ZERO:        Data 0    ; 23
+ONE:         Data 1    ; 24
+NEGONE:      Data 0    ; 25
+TEN:         Data 10   ; 26
+NEWLINE:     Data 10   ; 27
+CR:          Data 13   ; 28
+RET_ADDR_PI: Data 0    ; 29  ; PRINTINT return slot
+; slot 30 free
+
+; ===== Extended Data (X1 base = 32) =====
+LOC 32
+D_MINUS:           Data 45                ; 0  '-'
+D_ASCII_ZERO:      Data 48                ; 1  '0'
+
+; READINT pointer table
+D_P_READINT:       Data READINT           ; 2
+D_P_RESTORE:       Data RESTORE_AND_LOOP  ; 3
+D_P_DIGIT_LOOP:    Data DIGIT_LOOP        ; 4
+D_P_END_READINT:   Data END_READINT       ; 5
+
+; PRINTINT pointer table + constants
+D_P_PRINTINT:      Data PRINTINT          ; 6
+D_P_PI_POS:        Data PI_POSITIVE       ; 7
+D_P_PI_1000:       Data PI_1000           ; 8
+D_P_PI_100:        Data PI_100            ; 9
+D_P_PI_10:         Data PI_10             ; 10
+D_P_PI_1:          Data PI_1              ; 11
+D_10000:           Data 10000             ; 12
+D_1000:            Data 1000              ; 13
+D_100:             Data 100               ; 14
+D_10:              Data 10                ; 15
+D_P_LAST10:        Data LAST10            ; 16
+D_P_EMIT_TENS:     Data EMIT_TENS         ; 17
+D_P_EMIT_UNITS:    Data EMIT_UNITS        ; 18
+
+; Main-logic jump pointers
+D_P_POS1:          Data POS1              ; 19
+D_P_POS2:          Data POS2              ; 20
+D_P_POS3:          Data POS3              ; 21
+D_P_AFTER1:        Data AFTER1            ; 22
+D_P_AFTER2:        Data AFTER2            ; 23
+
+; READINT head-skip helpers
+D_P_HEADCHECK:     Data HEADCHECK         ; 24
+D_P_SKIPHEAD:      Data SKIPHEAD          ; 25
+; 26..31 free
+
+; ===== Code (Starts at 256) =====
+LOC 256
+
+; --- Bootstrap: set X1=32; NEGONE=-1 ---
+LDR 1, 0, ZERO
+AIR 1, 31
+AIR 1, 1
+STR 1, 0, TMP
+LDX 1, TMP
+
+LDR 1, 0, ZERO
+SIR 1, 1
+STR 1, 0, NEGONE
+
+; --- Read 3 full ints: NUM1, NUM2, NUM3 ---
+JSR 0, 1, 2, 1         ; READINT()
+LDR 0, 0, RETVAL
+STR 0, 0, NUM1
+
+JSR 0, 1, 2, 1
+LDR 0, 0, RETVAL
+STR 0, 0, NUM2
+
+JSR 0, 1, 2, 1
+LDR 0, 0, RETVAL
+STR 0, 0, NUM3
+
+; --- Read target ---
+JSR 0, 1, 2, 1
+LDR 0, 0, RETVAL
+STR 0, 0, TARGET
+
+; --- DIFF1 = |NUM1 - TARGET| ---
+LDR 1, 0, NUM1
+SMR 1, 0, TARGET
+JGE 1, 1, 19, 1        ; -> POS1 via D_P_POS1
+NOT 1
+AIR 1, 1
+POS1:
+STR 1, 0, DIFF1
+
+; --- DIFF2 = |NUM2 - TARGET| ---
+LDR 1, 0, NUM2
+SMR 1, 0, TARGET
+JGE 1, 1, 20, 1        ; -> POS2 via D_P_POS2
+NOT 1
+AIR 1, 1
+POS2:
+STR 1, 0, DIFF2
+
+; --- DIFF3 = |NUM3 - TARGET| ---
+LDR 1, 0, NUM3
+SMR 1, 0, TARGET
+JGE 1, 1, 21, 1        ; -> POS3 via D_P_POS3
+NOT 1
+AIR 1, 1
+POS3:
+STR 1, 0, DIFF3
+
+; --- best = NUM1 / DIFF1 ---
+LDR 0, 0, NUM1
+STR 0, 0, CURVAL
+LDR 3, 0, DIFF1
+STR 3, 0, CURDIFF
+
+; --- compare DIFF2 vs CURDIFF ---
+STR 3, 0, TMP
+LDR 1, 0, DIFF2
+SMR 1, 0, TMP
+JGE 1, 1, 22, 1        ; -> AFTER1 via D_P_AFTER1
+LDR 0, 0, NUM2
+STR 0, 0, CURVAL
+LDR 3, 0, DIFF2
+STR 3, 0, CURDIFF
+LDR 2, 0, ONE
+JNE 2, 1, 22, 1        ; unconditional -> AFTER1
+
+; --- compare DIFF3 vs CURDIFF ---
+AFTER1:
+STR 3, 0, TMP
+LDR 1, 0, DIFF3
+SMR 1, 0, TMP
+JGE 1, 1, 23, 1        ; -> AFTER2 via D_P_AFTER2
+LDR 0, 0, NUM3
+STR 0, 0, CURVAL
+LDR 3, 0, DIFF3
+STR 3, 0, CURDIFF
+LDR 2, 0, ONE
+JNE 2, 1, 23, 1        ; unconditional -> AFTER2
+
+; --- print ONLY the closest number and halt ---
+AFTER2:
+LDR 0, 0, CURVAL
+JSR 0, 1, 6, 1         ; PRINTINT
+HLT
+
+; ===== Subroutine: READINT =====
+; Reads signed decimal from keyboard (dev 0) with echo to PRINTER (dev 1).
+; Result -> RETVAL. Clobbers R0..R3. Requires X1=32.
+; (If you prefer silent input, delete the OUT lines below.)
+READINT:
+    STR 3, 0, RET_ADDR
+    LDR 0, 0, ZERO      ; accum = 0
+    LDR 1, 0, ONE       ; sign  = +1
+
+    IN  2, 0            ; first char
+    OUT 2, 1            ; echo to PRINTER
+    LDR 3, 0, ONE
+    JNE 3, 1, 24, 1     ; -> HEADCHECK (via D_P_HEADCHECK)
+
+HEADCHECK:
+    ; skip LF(10) / CR(13)
+    STR 2, 0, TMP
+    LDR 3, 0, NEWLINE
+    STR 3, 0, TMP3
+    LDR 2, 0, TMP
+    SMR 2, 0, TMP3
+    JZ  2, 1, 25, 1     ; -> SKIPHEAD
+    LDR 3, 0, CR
+    STR 3, 0, TMP3
+    LDR 2, 0, TMP
+    SMR 2, 0, TMP3
+    JZ  2, 1, 25, 1     ; -> SKIPHEAD
+    LDR 2, 0, TMP       ; keep non-terminator
+
+    ; if first char == '-'
+    LDR 3, 1, 0         ; R3 = '-'
+    STR 2, 0, TMP
+    STR 3, 0, TMP3
+    SMR 2, 0, TMP3      ; zero if '-'
+    JNE 2, 1, 3, 1      ; -> RESTORE_AND_LOOP if not '-'
+
+    ; was minus: set sign = -1, read next char
+    LDR 1, 0, NEGONE
+    IN  2, 0
+    OUT 2, 1            ; echo to PRINTER
+    LDR 3, 0, ONE
+    JNE 3, 1, 4, 1      ; -> DIGIT_LOOP
+
+SKIPHEAD:
+    IN  2, 0
+    OUT 2, 1            ; echo to PRINTER
+    LDR 3, 0, ONE
+    JNE 3, 1, 24, 1     ; -> HEADCHECK
+
+RESTORE_AND_LOOP:
+    LDR 2, 0, TMP
+
+DIGIT_LOOP:
+    ; newline?
+    LDR 3, 0, NEWLINE
+    STR 2, 0, TMP
+    STR 3, 0, TMP3
+    SMR 2, 0, TMP3
+    JZ  2, 1, 5, 1      ; -> END_READINT
+
+    ; carriage return?
+    LDR 2, 0, TMP
+    LDR 3, 0, CR
+    STR 3, 0, TMP3
+    SMR 2, 0, TMP3
+    JZ  2, 1, 5, 1      ; -> END_READINT
+
+    LDR 2, 0, TMP       ; restore char
+
+    ; convert ASCII to digit (R2 -= '0')
+    LDR 3, 1, 1         ; '0'
+    STR 3, 0, TMP3
+    SMR 2, 0, TMP3
+
+    ; accum = accum*10 + digit
+    STR 0, 0, TMP
+    STR 1, 0, TMP2
+    STR 2, 0, TMP_DIGIT
+
+    LDR 0, 0, TMP
+    LDR 2, 0, TEN
+    MLT 0, 2            ; R0*R2, low 16 in R1
+    STR 1, 0, ACCUM_MULT
+    LDR 0, 0, ACCUM_MULT
+    AMR 0, 0, TMP_DIGIT
+
+    LDR 1, 0, TMP2      ; restore sign
+
+    IN  2, 0            ; next char
+    OUT 2, 1            ; echo to PRINTER
+    LDR 3, 0, ONE
+    JNE 3, 1, 4, 1      ; -> DIGIT_LOOP
+
+END_READINT:
+    ; apply sign: R0 *= sign (result in R1)
+    STR 1, 0, SIGN_MEM
+    LDR 2, 0, SIGN_MEM
+    MLT 0, 2
+    STR 1, 0, TMP
+    LDR 0, 0, TMP
+    STR 0, 0, RETVAL
+
+    LDR 3, 0, RET_ADDR
+    RFS 0
+
+; ===== Subroutine: PRINTINT =====
+; In:  R0 = signed 16-bit int
+; Out: prints [-]digits + newline to Printer (dev 1)
+; Clobbers: R0..R3 ; uses TMP,TMP2,TMP3 ; needs X1=32
+PRINTINT:
+    STR 3, 0, RET_ADDR_PI
+
+    ; sign
+    STR 0, 0, TMP
+    LDR 0, 0, TMP
+    JGE 0, 1, 7, 1           ; -> PI_POSITIVE
+    LDR 0, 1, 0              ; '-'
+    OUT 0, 1                 ; PRINTER
+    LDR 0, 0, TMP
+    NOT 0
+    AIR 0, 1
+
+PI_POSITIVE:
+    LDR 3, 0, ZERO           ; started = 0
+
+    ; /10000
+    LDR 2, 1, 12
+    DVD 0, 2
+    STR 1, 0, TMP            ; rem
+    STR 0, 0, TMP2           ; q
+    JNE 3, 1, 8, 1
+    JNE 0, 1, 8, 1
+    LDR 0, 0, TMP
+    LDR 2, 0, ONE
+    JNE 2, 1, 8, 1
+
+PI_1000:
+    STR 3, 0, TMP3
+    LDR 3, 0, TMP2
+    JZ  3, 1, 9, 1
+    LDR 0, 0, TMP2
+    AMR 0, 1, 1
+    OUT 0, 1                 ; PRINTER
+    LDR 3, 0, ONE
+    STR 3, 0, TMP3
+
+PI_100:
+    LDR 3, 0, TMP3
+    LDR 2, 1, 13
+    DVD 0, 2
+    STR 1, 0, TMP
+    STR 0, 0, TMP2
+    JNE 3, 1, 10, 1
+    JNE 0, 1, 10, 1
+    LDR 0, 0, TMP
+    LDR 2, 0, ONE
+    JNE 2, 1, 10, 1
+
+PI_10:
+    LDR 3, 0, TMP2
+    JZ  3, 1, 11, 1
+    LDR 0, 0, TMP2
+    AMR 0, 1, 1
+    OUT 0, 1                 ; PRINTER
+    LDR 3, 0, ONE
+    STR 3, 0, TMP3
+
+PI_1:
+    LDR 3, 0, TMP3
+    LDR 2, 1, 14
+    DVD 0, 2
+    STR 1, 0, TMP
+    STR 0, 0, TMP2
+    JNE 3, 1, 16, 1
+    JNE 0, 1, 16, 1
+    LDR 0, 0, TMP
+    LDR 2, 0, ONE
+    JNE 2, 1, 16, 1
+
+LAST10:
+    LDR 2, 1, 15
+    DVD 0, 2                 ; Q=tens, R=units
+    STR 1, 0, TMP            ; units
+    STR 0, 0, TMP2           ; tens
+    JNE 3, 1, 17, 1          ; -> EMIT_TENS if started
+    JZ  0, 1, 18, 1          ; if tens==0 -> EMIT_UNITS
+
+EMIT_TENS:
+    LDR 0, 0, TMP2
+    AMR 0, 1, 1
+    OUT 0, 1                 ; PRINTER
+    LDR 3, 0, ONE
+
+EMIT_UNITS:
+    LDR 0, 0, TMP
+    AMR 0, 1, 1
+    OUT 0, 1                 ; PRINTER
+
+    ; newline
+    LDR 0, 0, NEWLINE
+    OUT 0, 1                 ; PRINTER
+
+    LDR 3, 0, RET_ADDR_PI
+    RFS 0
